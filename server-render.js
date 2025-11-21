@@ -168,12 +168,19 @@ app.use('*', (req, res) => {
     });
 });
 // ==============================================
-// 👤 BASIC USER ROUTES - SIMPLIFIED VERSION
+// 👤 BASIC USER ROUTES (ADDED DIRECTLY)
 // ==============================================
+const bcrypt = require("bcryptjs");
+const { 
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, 
+  query, where, deleteDoc, Timestamp 
+} = require('firebase/firestore');
+
+// 🔹 1. REGISTER USER
 app.post("/api/register", async (req, res) => {
   try {
     const { nom, email, mot_de_passe, role } = req.body;
-    console.log("📥 Register request:", { nom, email, role });
+    console.log("📥 Registration request:", { nom, email, role });
 
     if (!nom || !email || !mot_de_passe || !role) {
       return res.status(400).json({ 
@@ -181,18 +188,41 @@ app.post("/api/register", async (req, res) => {
       });
     }
 
-    res.json({
-      message: "✅ Registration endpoint is working!",
-      dataReceived: { nom, email, role },
-      nextStep: "Firebase integration will be added next"
+    // Check if user exists
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    if (userDoc.exists()) {
+      return res.status(400).json({ 
+        message: "❌ Cet e-mail est déjà utilisé." 
+      });
+    }
+
+    // Hash password & generate code
+    const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Save to pending
+    await setDoc(doc(db, "pending_verifications", `pending_${Date.now()}`), {
+      nom, email, mot_de_passe: hashedPassword, role,
+      code_verification: verificationCode,
+      date_creation: Timestamp.now(),
+      expiration: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000))
+    });
+
+    console.log(`✅ Registration pending for ${email}, code: ${verificationCode}`);
+    
+    res.status(200).json({ 
+      message: "✅ Code de vérification généré.",
+      email: email,
+      code: verificationCode // للاختبار
     });
 
   } catch (error) {
-    console.error("❌ Register error:", error);
-    res.status(500).json({ message: "❌ Server error" });
+    console.error("❌ Registration error:", error);
+    res.status(500).json({ message: "❌ Erreur interne du serveur." });
   }
 });
 
+// 🔹 2. USER LOGIN
 app.post("/api/login", async (req, res) => {
   try {
     const { email, mot_de_passe } = req.body;
@@ -204,51 +234,49 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    res.json({
-      message: "✅ Login endpoint is working!",
-      dataReceived: { email },
-      nextStep: "Firebase authentication will be added next"
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    const user = userDoc.data();
+    const isPasswordValid = await bcrypt.compare(mot_de_passe, user.mot_de_passe);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        message: "❌ Mot de passe incorrect." 
+      });
+    }
+
+    console.log(`✅ Login successful for: ${email}`);
+    res.status(200).json({
+      message: "✅ Connexion réussie.",
+      user: {
+        id: userDoc.id,
+        nom: user.nom,
+        email: user.email,
+        role: user.role
+      }
     });
 
   } catch (error) {
     console.error("❌ Login error:", error);
-    res.status(500).json({ message: "❌ Server error" });
+    res.status(500).json({ message: "❌ Erreur interne du serveur." });
   }
 });
 
-app.post("/api/verify-code", async (req, res) => {
-  try {
-    const { email, code } = req.body;
-    console.log("📩 Verification request:", { email, code });
-
-    if (!email || !code) {
-      return res.status(400).json({ 
-        message: "❌ Email et code sont requis." 
-      });
-    }
-
-    res.json({
-      message: "✅ Verification endpoint is working!",
-      dataReceived: { email, code },
-      nextStep: "Email verification logic will be added next"
-    });
-
-  } catch (error) {
-    console.error("❌ Verification error:", error);
-    res.status(500).json({ message: "❌ Server error" });
-  }
-});
-
-// Route لاختبار الـ routes الجديدة
+// 🔹 3. TEST ROUTE
 app.get("/api/user-test", (req, res) => {
   res.json({
-    message: "✅ User routes are ready!",
+    message: "✅ User routes are working!",
     availableEndpoints: [
-      "POST /api/register - Register new user",
-      "POST /api/login - User login", 
-      "POST /api/verify-code - Verify email code"
+      "POST /api/register",
+      "POST /api/login"
     ],
-    status: "working"
+    status: "ready"
   });
 });
 // ==============================================
