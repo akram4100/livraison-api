@@ -1,224 +1,544 @@
-// controllers/userController.js
+// controllers/userController.js - Firebase Version FIXED
 import bcrypt from "bcryptjs";
-import db from "../config/db.js";
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  query, 
+  where, 
+  deleteDoc,
+  Timestamp 
+} from "firebase/firestore";
+import { db } from "../server.js"; // ✅ تم التصحيح - من server.js بدلاً من firebase-config.js
 import { sendEmail } from "../utils/emailService.js";
 
 /* =========================================================================
-   🔹 1. Enregistrement d'un nouvel utilisateur (étape 1 : temporaire)
+   🔹 1. REGISTER USER (Step 1: Temporary Storage)
    ========================================================================= */
 export const registerUser = async (req, res) => {
   try {
     const { nom, email, mot_de_passe, role } = req.body;
-    console.log("📥 Données reçues pour inscription:", req.body);
+    console.log("📥 Registration request received:", { nom, email, role });
 
-    // الحصول على الاتصال من Promise
-    const connection = await db;
+    // Validate required fields
+    if (!nom || !email || !mot_de_passe || !role) {
+      return res.status(400).json({ 
+        message: "❌ Tous les champs sont obligatoires." 
+      });
+    }
 
-    // Vérifier si l'utilisateur existe déjà
-    const [existing] = await connection.query("SELECT * FROM utilisateurs WHERE email = ?", [email]);
-    if (existing.length > 0)
-      return res.status(400).json({ message: "❌ Cet e-mail est déjà utilisé." });
+    // Check if user already exists in main collection
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    if (userDoc.exists()) {
+      return res.status(400).json({ 
+        message: "❌ Cet e-mail est déjà utilisé." 
+      });
+    }
 
-    // Vérifier s'il y a déjà une vérification en attente
-    const [pending] = await connection.query("SELECT * FROM pending_verifications WHERE email = ?", [email]);
-    if (pending.length > 0)
-      return res.status(400).json({ message: "⚠️ Un code a déjà été envoyé à cet e-mail." });
+    // Check for existing pending verification
+    const pendingQuery = query(
+      collection(db, "pending_verifications"), 
+      where("email", "==", email)
+    );
+    const pendingSnapshot = await getDocs(pendingQuery);
+    
+    if (!pendingSnapshot.empty) {
+      // Delete existing pending verification
+      const deletePromises = pendingSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+    }
 
-    // Hash du mot de passe
+    // Hash password
     const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
 
-    // Générer un code OTP à 6 chiffres
+    // Generate OTP
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiration = new Date(Date.now() + 10 * 60 * 1000); // expire dans 10 min
+    const expiration = Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 minutes
 
-    // Sauvegarder dans la table temporaire
-    await connection.query(
-      "INSERT INTO pending_verifications (nom, email, mot_de_passe, role, code_verification, expiration) VALUES (?, ?, ?, ?, ?, ?)",
-      [nom, email, hashedPassword, role, verificationCode, expiration]
-    );
+    // Save to pending_verifications
+    const pendingId = `pending_${Date.now()}`;
+    await setDoc(doc(db, "pending_verifications", pendingId), {
+      nom,
+      email,
+      mot_de_passe: hashedPassword,
+      role,
+      code_verification: verificationCode,
+      date_creation: Timestamp.now(),
+      expiration
+    });
 
-    // Envoi du mail
-    const userName = nom || "Utilisateur";
-    await sendEmail(
+    // Send email
+    const emailResult = await sendEmail(
       email,
       "Code de vérification - Livraison Express",
       verificationCode,
-      userName
+      nom
     );
 
-    console.log(`✅ Code envoyé à ${email}: ${verificationCode}`);
-    res.status(200).json({ message: "✅ Code envoyé à votre e-mail." });
+    if (!emailResult.ok) {
+      console.error("❌ Email sending failed:", emailResult.error);
+      return res.status(500).json({ 
+        message: "❌ Erreur lors de l'envoi de l'email." 
+      });
+    }
+
+    console.log(`✅ Verification code sent to ${email}: ${verificationCode}`);
+    res.status(200).json({ 
+      message: "✅ Code de vérification envoyé à votre e-mail.",
+      email: email
+    });
+
   } catch (error) {
-    console.error("❌ Erreur lors de l'inscription:", error);
-    res.status(500).json({ message: "Erreur interne du serveur." });
+    console.error("❌ Registration error:", error);
+    
+    // ✅ معالجة أخطاء Firebase المحددة
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    if (error.code === 'permission-denied') {
+      return res.status(500).json({ 
+        message: "❌ Problème de permissions. Vérifiez les règles Firebase." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur interne du serveur." 
+    });
   }
 };
 
 /* =========================================================================
-   🔹 2. Vérification du code reçu (activation du compte)
+   🔹 2. VERIFY EMAIL CODE (Account Activation)
    ========================================================================= */
 export const verifyEmailCode = async (req, res) => {
   try {
     const { email, code } = req.body;
-    console.log("📩 Vérification du code pour:", email);
+    console.log("📩 Email verification request:", { email, code });
 
-    const connection = await db;
+    if (!email || !code) {
+      return res.status(400).json({ 
+        message: "❌ Email et code sont requis." 
+      });
+    }
 
-    // Recherche du code dans la table temporaire
-    const [pending] = await connection.query(
-      "SELECT * FROM pending_verifications WHERE email = ? AND code_verification = ? AND expiration > NOW()",
-      [email, code]
+    // Find pending verification
+    const pendingQuery = query(
+      collection(db, "pending_verifications"), 
+      where("email", "==", email),
+      where("code_verification", "==", code)
     );
+    
+    const pendingSnapshot = await getDocs(pendingQuery);
 
-    if (pending.length === 0)
-      return res.status(400).json({ message: "❌ Code invalide ou expiré." });
+    if (pendingSnapshot.empty) {
+      return res.status(400).json({ 
+        message: "❌ Code invalide ou expiré." 
+      });
+    }
 
-    const user = pending[0];
+    const pendingData = pendingSnapshot.docs[0].data();
+    const pendingRef = pendingSnapshot.docs[0].ref;
 
-    // Déplacer l'utilisateur dans la table principale
-    await connection.query(
-      "INSERT INTO utilisateurs (nom, email, mot_de_passe, role, verifie) VALUES (?, ?, ?, ?, 1)",
-      [user.nom, user.email, user.mot_de_passe, user.role]
-    );
+    // Check expiration
+    if (pendingData.expiration.toDate() < new Date()) {
+      await deleteDoc(pendingRef);
+      return res.status(400).json({ 
+        message: "❌ Code expiré." 
+      });
+    }
 
-    // Supprimer de la table temporaire
-    await connection.query("DELETE FROM pending_verifications WHERE email = ?", [email]);
+    // Create user in main collection
+    await setDoc(doc(db, "utilisateurs", email), {
+      nom: pendingData.nom,
+      email: pendingData.email,
+      mot_de_passe: pendingData.mot_de_passe,
+      role: pendingData.role,
+      verified: true,
+      date_creation: Timestamp.now(),
+      reset_code: null,
+      reset_expires: null,
+      telephone: "",
+      ville: ""
+    });
 
-    console.log("✅ Email vérifié et utilisateur activé.");
-    res.status(200).json({ message: "✅ Email vérifié avec succès !" });
+    // Delete pending verification
+    await deleteDoc(pendingRef);
+
+    console.log(`✅ User ${email} verified and activated`);
+    res.status(200).json({ 
+      message: "✅ Email vérifié avec succès !",
+      user: {
+        nom: pendingData.nom,
+        email: pendingData.email,
+        role: pendingData.role
+      }
+    });
+
   } catch (error) {
-    console.error("❌ Erreur lors de la vérification du code:", error);
-    res.status(500).json({ message: "Erreur serveur lors de la vérification." });
+    console.error("❌ Email verification error:", error);
+    
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la vérification." 
+    });
   }
 };
 
 /* =========================================================================
-   🔹 3. Connexion utilisateur (login)
+   🔹 3. USER LOGIN - FIXED VERSION
    ========================================================================= */
 export const loginUser = async (req, res) => {
   try {
     const { email, mot_de_passe } = req.body;
+    console.log("🔐 Login attempt for:", email);
 
-    const connection = await db;
-    const [rows] = await connection.query("SELECT * FROM utilisateurs WHERE email = ?", [email]);
-    if (rows.length === 0)
-      return res.status(404).json({ message: "❌ Utilisateur introuvable." });
+    if (!email || !mot_de_passe) {
+      return res.status(400).json({ 
+        message: "❌ Email et mot de passe sont requis." 
+      });
+    }
 
-    const user = rows[0];
+    // ✅ الطريقة الصحيحة للقراءة من Firestore
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
 
-    const isMatch = await bcrypt.compare(mot_de_passe, user.mot_de_passe);
-    if (!isMatch)
-      return res.status(401).json({ message: "❌ Mot de passe incorrect." });
+    const user = userDoc.data();
 
-    if (!user.verifie)
-      return res.status(403).json({ message: "⚠️ Compte non vérifié." });
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(mot_de_passe, user.mot_de_passe);
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        message: "❌ Mot de passe incorrect." 
+      });
+    }
 
-    console.log("✅ Connexion réussie pour:", user.email);
+    // Check if account is verified
+    if (!user.verified) {
+      return res.status(403).json({ 
+        message: "⚠️ Compte non vérifié. Veuillez vérifier votre email." 
+      });
+    }
+
+    console.log(`✅ Login successful for: ${email}`);
     res.status(200).json({
       message: "✅ Connexion réussie.",
-      user: { id: user.id, nom: user.nom, role: user.role, email: user.email },
+      user: {
+        id: userDoc.id,
+        nom: user.nom,
+        email: user.email,
+        role: user.role,
+        ville: user.ville || "",
+        telephone: user.telephone || ""
+      }
     });
+
   } catch (error) {
-    console.error("❌ Erreur lors de la connexion:", error);
-    res.status(500).json({ message: "Erreur interne du serveur." });
+    console.error("❌ Login error:", error);
+    
+    // ✅ معالجة أفضل للأخطاء
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    if (error.code === 'permission-denied') {
+      return res.status(500).json({ 
+        message: "❌ Problème de permissions. Vérifiez les règles Firebase." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur interne du serveur." 
+    });
   }
 };
 
 /* =========================================================================
-   🔹 4. Mot de passe oublié (envoi du code OTP)
+   🔹 4. FORGOT PASSWORD (Send Reset Code)
    ========================================================================= */
 export const sendPasswordResetCode = async (req, res) => {
   try {
     const { email } = req.body;
-    console.log("📩 Requête de réinitialisation pour:", email);
+    console.log("📧 Password reset request for:", email);
 
-    const connection = await db;
-
-    // ✅ البحث في قاعدة البيانات والحصول على الاسم
-    const [userRows] = await connection.query("SELECT nom, email FROM utilisateurs WHERE email = ?", [email]);
-    
-    if (userRows.length === 0) {
-      console.log("❌ Utilisateur non trouvé dans la base de données");
-      return res.status(404).json({ message: "❌ Utilisateur introuvable." });
+    if (!email) {
+      return res.status(400).json({ 
+        message: "❌ Email est requis." 
+      });
     }
 
-    const user = userRows[0];
-    console.log("👤 Utilisateur trouvé dans la base:", user);
+    // Check if user exists
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      console.log("❌ User not found:", email);
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiration = new Date(Date.now() + 10 * 60 * 1000); // 10 min
-
-    // Mise à jour du code OTP dans la base
-    await connection.query(
-      "UPDATE utilisateurs SET reset_code = ?, reset_expires = ? WHERE email = ?",
-      [otp, expiration, email]
-    );
-
-    console.log(`🧾 Code OTP pour ${email}: ${otp} (expire à ${expiration})`);
-
-    // ✅ استخدام الاسم من قاعدة البيانات مع قيمة افتراضية
+    const user = userDoc.data();
     const userName = user.nom || "Utilisateur";
-    console.log("👤 Nom utilisé pour l'email:", userName);
 
-    // Envoi d'email via EmailJS
-    await sendEmail(
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiration = Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 minutes
+
+    // Update user with reset code
+    await updateDoc(doc(db, "utilisateurs", email), {
+      reset_code: otp,
+      reset_expires: expiration
+    });
+
+    console.log(`🔐 Reset OTP for ${email}: ${otp}`);
+
+    // Send email
+    const emailResult = await sendEmail(
       email,
-      "Code de réinitialisation du mot de passe - Livraison Express",
+      "Code de réinitialisation - Livraison Express",
       otp,
       userName
     );
 
-    console.log("✅ Email envoyé avec nom:", userName);
-    res.status(200).json({ message: "✅ Code envoyé avec succès." });
+    if (!emailResult.ok) {
+      console.error("❌ Reset email failed:", emailResult.error);
+      return res.status(500).json({ 
+        message: "❌ Erreur lors de l'envoi du code." 
+      });
+    }
+
+    console.log(`✅ Reset code sent to ${email}`);
+    res.status(200).json({ 
+      message: "✅ Code de réinitialisation envoyé avec succès.",
+      email: email
+    });
+
   } catch (error) {
-    console.error("❌ Erreur dans sendPasswordResetCode:", error);
-    res.status(500).json({ message: "Erreur serveur lors de l'envoi du code." });
+    console.error("❌ Password reset request error:", error);
+    
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur lors de l'envoi du code." 
+    });
   }
 };
 
-/* =========================================================================
-   🔹 5. Vérification du code OTP de réinitialisation
-   ========================================================================= */
+// ... باقي الدوال بنفس النمط (verifyResetCode, resetPassword, etc.) ...
+
 export const verifyResetCode = async (req, res) => {
   try {
     const { email, code } = req.body;
-    console.log("📩 Vérification du code pour:", email);
+    console.log("🔍 Verifying reset code for:", email);
 
-    const connection = await db;
-    const [rows] = await connection.query(
-      "SELECT * FROM utilisateurs WHERE email = ? AND reset_code = ? AND reset_expires > NOW()",
-      [email, code]
-    );
+    if (!email || !code) {
+      return res.status(400).json({ 
+        message: "❌ Email et code sont requis." 
+      });
+    }
 
-    if (rows.length === 0)
-      return res.status(400).json({ message: "❌ Code invalide ou expiré." });
+    // Get user
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
 
-    res.status(200).json({ message: "✅ Code vérifié avec succès." });
+    const user = userDoc.data();
+
+    // Check reset code and expiration
+    if (!user.reset_code || user.reset_code !== code) {
+      return res.status(400).json({ 
+        message: "❌ Code de réinitialisation invalide." 
+      });
+    }
+
+    if (user.reset_expires.toDate() < new Date()) {
+      return res.status(400).json({ 
+        message: "❌ Code de réinitialisation expiré." 
+      });
+    }
+
+    console.log(`✅ Reset code verified for: ${email}`);
+    res.status(200).json({ 
+      message: "✅ Code vérifié avec succès.",
+      email: email
+    });
+
   } catch (error) {
-    console.error("❌ Erreur lors de la vérification du code:", error);
-    res.status(500).json({ message: "Erreur serveur lors de la vérification." });
+    console.error("❌ Reset code verification error:", error);
+    
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la vérification." 
+    });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  try {
+    const { email, nouveauMotDePasse } = req.body;
+    console.log("🔄 Password reset final step for:", email);
+
+    if (!email || !nouveauMotDePasse) {
+      return res.status(400).json({ 
+        message: "❌ Email et nouveau mot de passe sont requis." 
+      });
+    }
+
+    if (nouveauMotDePasse.length < 6) {
+      return res.status(400).json({ 
+        message: "❌ Le mot de passe doit contenir au moins 6 caractères." 
+      });
+    }
+
+    // Get user to verify existence
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(nouveauMotDePasse, 10);
+
+    // Update password and clear reset fields
+    await updateDoc(doc(db, "utilisateurs", email), {
+      mot_de_passe: hashedPassword,
+      reset_code: null,
+      reset_expires: null
+    });
+
+    console.log(`✅ Password reset successfully for: ${email}`);
+    res.status(200).json({ 
+      message: "✅ Mot de passe réinitialisé avec succès." 
+    });
+
+  } catch (error) {
+    console.error("❌ Password reset error:", error);
+    
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la réinitialisation." 
+    });
+  }
+};
+/* =========================================================================
+   🔹 7. GET USER PROFILE (ADDED)
+   ========================================================================= */
+export const getUserProfile = async (req, res) => {
+  try {
+    const { email } = req.params;
+    console.log("👤 Profile request for:", email);
+
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    const user = userDoc.data();
+    
+    // Remove sensitive data
+    const { mot_de_passe, reset_code, reset_expires, ...userProfile } = user;
+
+    res.status(200).json({
+      message: "✅ Profil utilisateur récupéré.",
+      user: userProfile
+    });
+
+  } catch (error) {
+    console.error("❌ Get profile error:", error);
+    
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la récupération du profil." 
+    });
   }
 };
 
 /* =========================================================================
-   🔹 6. Réinitialisation finale du mot de passe
+   🔹 8. UPDATE USER PROFILE (ADDED)
    ========================================================================= */
-export const resetPassword = async (req, res) => {
+export const updateUserProfile = async (req, res) => {
   try {
-    const { email, nouveauMotDePasse } = req.body;
+    const { email } = req.params;
+    const { nom, telephone, ville } = req.body;
+    console.log("✏️ Profile update for:", email);
 
-    const connection = await db;
-    const hashedPassword = await bcrypt.hash(nouveauMotDePasse, 10);
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
 
-    await connection.query(
-      "UPDATE utilisateurs SET mot_de_passe = ?, reset_code = NULL, reset_expires = NULL WHERE email = ?",
-      [hashedPassword, email]
-    );
+    const updateData = {};
+    if (nom) updateData.nom = nom;
+    if (telephone) updateData.telephone = telephone;
+    if (ville) updateData.ville = ville;
 
-    console.log("✅ Mot de passe réinitialisé pour:", email);
-    res.status(200).json({ message: "✅ Mot de passe réinitialisé avec succès." });
+    await updateDoc(doc(db, "utilisateurs", email), updateData);
+
+    console.log(`✅ Profile updated for: ${email}`);
+    res.status(200).json({ 
+      message: "✅ Profil mis à jour avec succès." 
+    });
+
   } catch (error) {
-    console.error("❌ Erreur lors de la réinitialisation du mot de passe:", error);
-    res.status(500).json({ message: "Erreur serveur lors de la réinitialisation." });
+    console.error("❌ Profile update error:", error);
+    
+    if (error.code === 'unavailable') {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible. Réessayez plus tard." 
+      });
+    }
+    
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la mise à jour du profil." 
+    });
   }
 };

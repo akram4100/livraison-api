@@ -1,122 +1,98 @@
 ﻿// utils/emailService.js
-import emailjs from "@emailjs/nodejs";
-import dotenv from "dotenv";
+import nodemailer from 'nodemailer';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
-const SERVICE_ID = process.env.EMAILJS_SERVICE_ID;
-const TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID;
-const PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY;
-const PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
-
-function checkEnv() {
-  const missing = [];
-  if (!SERVICE_ID) missing.push("EMAILJS_SERVICE_ID");
-  if (!TEMPLATE_ID) missing.push("EMAILJS_TEMPLATE_ID");
-  if (!PUBLIC_KEY) missing.push("EMAILJS_PUBLIC_KEY");
-  if (!PRIVATE_KEY) missing.push("EMAILJS_PRIVATE_KEY");
-  return missing;
-}
-
-/**
- * sendEmail
- * إرسال بريد مع تسجيل مفصّل لمساعدة تصحيح الأخطاء.
- * يعيد كائن مفصل مع status/logs.
- */
 export async function sendEmail(to, subject, otp_code, user_name = "Utilisateur") {
-  const logs = [];
   try {
-    logs.push("🔎 Starting sendEmail...");
+    console.log('🚀 بدء إرسال الإيميل عبر Gmail...');
     
-    // 1) تحقق من المتغيرات البيئية
-    const missing = checkEnv();
-    if (missing.length > 0) {
-      const msg = `❌ Missing EmailJS env vars: ${missing.join(", ")}`;
-      logs.push(msg);
-      console.error(msg);
-      return { ok: false, error: msg, logs };
+    // التحقق من إعدادات Gmail
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+      throw new Error('❌ إعدادات Gmail غير مكتملة في ملف .env');
     }
 
-    // 2) تحضير payload للـ template - شامل لكل المتغيرات
-    const templateParams = {
-      to_email: to,
+    console.log('✅ الإعدادات صحيحة:', {
+      from: process.env.GMAIL_USER,
+      to: to,
+      subject: subject
+    });
+
+    // إنشاء Nodemailer transporter
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD
+      }
+    });
+
+    // محتوى الإيميل (نفس تصميم القالب السابق)
+    const htmlContent = `
+      <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="margin: 0; font-size: 28px;">Livraison Express 🚚</h1>
+          <p style="margin: 10px 0 0 0; font-size: 16px;">Vérification de votre compte</p>
+        </div>
+        <div style="padding: 30px; background: white; border-radius: 0 0 10px 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
+          <h2 style="color: #333; text-align: center;">مرحباً ${user_name}!</h2>
+          <p style="color: #666; text-align: center; font-size: 16px;">رمز التحقق الخاص بك هو:</p>
+          <div style="text-align: center; margin: 20px 0;">
+            <div style="display: inline-block; background: #f8f9fa; border: 2px dashed #667eea; padding: 15px 30px; border-radius: 10px;">
+              <span style="font-size: 32px; font-weight: bold; color: #667eea; letter-spacing: 5px;">${otp_code}</span>
+            </div>
+          </div>
+          <p style="color: #666; text-align: center; font-size: 14px;">هذا الكود صالح لمدة <strong>10 دقائق</strong></p>
+          <div style="text-align: center; margin-top: 20px;">
+            <div style="font-size: 48px;">📦</div>
+          </div>
+        </div>
+        <div style="text-align: center; padding: 20px; color: #999; font-size: 12px;">
+          © 2024 Livraison Express. Tous droits réservés.
+        </div>
+      </div>
+    `;
+
+    // إعداد خيارات الإيميل
+    const mailOptions = {
+      from: `"Livraison Express" <${process.env.GMAIL_USER}>`,
+      to: to,
       subject: subject,
-      name: user_name,                    // للمتغير {{name}} في القالب
-      user_name: user_name,               // للمتغير {{user_name}} في القالب
-      username: user_name,                // للمتغير {{username}} في القالب
-      code: String(otp_code),             // للمتغير {{code}} في القالب
-      otp_code: String(otp_code),         // للمتغير {{otp_code}} في القالب
-      code_otp: String(otp_code),         // للمتغير {{code_otp}} في القالب
+      html: htmlContent
     };
 
-    // 🔍 DEBUG: طباعة البيانات المرسلة
-    console.log("📨 DEBUG - Email Data Being Sent:");
-    console.log("📧 To:", to);
-    console.log("📝 Subject:", subject);
-    console.log("🔢 OTP Code:", otp_code);
-    console.log("👤 User Name:", user_name);
-    console.log("🎯 Template Params:", templateParams);
+    // إرسال الإيميل
+    const result = await transporter.sendMail(mailOptions);
+    
+    console.log('✅ الإيميل مرسل بنجاح عبر Gmail!', {
+      messageId: result.messageId,
+      response: result.response
+    });
 
-    logs.push("📨 Prepared templateParams:");
-    logs.push(JSON.stringify(templateParams));
+    return { 
+      ok: true, 
+      result,
+      message: "تم إرسال الإيميل بنجاح" 
+    };
 
-    // 3) طباعة بيانات الاتصال (بدون مفاتيح حساسة كاملة)
-    logs.push(`🔧 Using SERVICE_ID=${SERVICE_ID}, TEMPLATE_ID=${TEMPLATE_ID}`);
-    logs.push(`🔧 PUBLIC_KEY=${PUBLIC_KEY ? PUBLIC_KEY.slice(0,4) + "..." : "undefined"}`);
-    logs.push(`🔧 PRIVATE_KEY=${PRIVATE_KEY ? PRIVATE_KEY.slice(0,4) + "..." : "undefined"}`);
-
-    // 4) فعلياً استدعاء EmailJS
-    logs.push("⏳ Calling emailjs.send(...)");
-    let response;
-    try {
-      response = await emailjs.send(
-        SERVICE_ID,
-        TEMPLATE_ID,
-        templateParams,
-        {
-          publicKey: PUBLIC_KEY,
-          privateKey: PRIVATE_KEY,
-        }
-      );
-    } catch (sendErr) {
-      logs.push("❌ emailjs.send threw an exception");
-      logs.push(String(sendErr));
-      console.error("❌ EmailJS Send Error:", sendErr);
-      if (sendErr && sendErr.response) {
-        try {
-          logs.push("sendErr.response (raw): " + JSON.stringify(sendErr.response));
-        } catch (e) {}
-      }
-      return { ok: false, error: "emailjs_send_exception", detail: sendErr, logs };
-    }
-
-    // 5) response قد يكون EmailJSResponseStatus أو ما شابه
-    logs.push("✅ emailjs.send returned:");
-    try {
-      logs.push(JSON.stringify(response));
-    } catch (e) {
-      logs.push(String(response));
-    }
-
-    // 6) فحص حالة الرد
-    const status = response && response.status ? response.status : null;
-    const text = response && response.text ? response.text : null;
-
-    console.log("✅ EmailJS Response Status:", status);
-    console.log("✅ EmailJS Response Text:", text);
-
-    if (status === 200 || status === "200" || text === "OK") {
-      logs.push("🎉 EmailJS reports success");
-      console.log("🎉 Email sent successfully!");
-      return { ok: true, response, logs };
-    } else {
-      logs.push("⚠️ EmailJS returned non-200 status or unknown response");
-      console.log("⚠️ EmailJS returned unexpected response");
-      return { ok: false, response, logs };
-    }
   } catch (error) {
-    logs.push("💥 Unexpected error in sendEmail: " + String(error));
-    console.error("💥 Unexpected error in sendEmail:", error);
-    return { ok: false, error: "unexpected_error", detail: error, logs };
+    console.error('💥 خطأ في إرسال الإيميل:', error);
+    
+    let errorMessage = "خطأ غير معروف في إرسال الإيميل";
+    
+    if (error.code === 'EAUTH') {
+      errorMessage = "خطأ في مصادقة Gmail. تحقق من GMAIL_APP_PASSWORD في ملف .env";
+    } else if (error.code === 'EENVELOPE') {
+      errorMessage = "خطأ في عنوان الإيميل. تأكد من صحة الإيميل المدخل";
+    } else {
+      errorMessage = error.message;
+    }
+    
+    return { 
+      ok: false, 
+      error: errorMessage,
+      detail: error
+    };
   }
 }
