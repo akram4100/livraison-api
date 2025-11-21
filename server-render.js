@@ -94,27 +94,32 @@ app.get("/api/health", (req, res) => {
 });
 
 // ==============================================
-// 👤 USER ROUTES - SIMPLE & WORKING
+// 👤 USER ROUTES - WITH REAL FIREBASE STORAGE
 // ==============================================
 const bcrypt = require("bcryptjs");
+const { 
+  collection, doc, getDoc, getDocs, setDoc, 
+  query, where, deleteDoc, Timestamp 
+} = require('firebase/firestore');
 
-// 🔹 TEST ROUTE
+// 🔹 TEST ROUTE - مع Firebase الحقيقي
 app.get("/api/user-test", (req, res) => {
   res.json({
-    message: "✅ User routes are LIVE!",
+    message: "✅ User routes with REAL Firebase Storage!",
     availableEndpoints: [
-      "POST /api/register",
-      "POST /api/login"
+      "POST /api/register - يحفظ في Firebase",
+      "POST /api/login - يقرأ من Firebase", 
+      "POST /api/verify-code - تحقق من الكود"
     ],
     firebase: db ? "Connected ✅" : "Disconnected ❌",
-    status: "working"
+    status: "ready"
   });
 });
 
-// 🔹 SIMPLE REGISTER
-app.post("/api/register", (req, res) => {
+// 🔹 REGISTER USER - يحفظ في Firebase الحقيقي
+app.post("/api/register", async (req, res) => {
   try {
-    console.log("📥 Register request received");
+    console.log("📥 Register request received:", req.body);
     const { nom, email, mot_de_passe, role } = req.body;
 
     if (!nom || !email || !mot_de_passe || !role) {
@@ -123,25 +128,58 @@ app.post("/api/register", (req, res) => {
       });
     }
 
+    if (!db) {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible" 
+      });
+    }
+
+    // تحقق إذا المستخدم موجود في Firebase
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    if (userDoc.exists()) {
+      return res.status(400).json({ 
+        message: "❌ Cet e-mail est déjà utilisé." 
+      });
+    }
+
+    // كلمة المرور مشفرة
+    const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // حفظ في pending_verifications في Firebase
+    const pendingId = `pending_${Date.now()}`;
+    await setDoc(doc(db, "pending_verifications", pendingId), {
+      nom, 
+      email, 
+      mot_de_passe: hashedPassword, 
+      role,
+      code_verification: verificationCode,
+      date_creation: Timestamp.now(),
+      expiration: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000))
+    });
+
+    console.log(`✅ User saved to Firebase: ${email}`);
     
     res.status(200).json({ 
-      message: "✅ Code de vérification généré.",
+      message: "✅ Utilisateur enregistré avec succès!",
       email: email,
       code: verificationCode,
-      firebase: db ? "ready" : "offline"
+      firebase: "saved_to_pending"
     });
 
   } catch (error) {
     console.error("❌ Registration error:", error);
-    res.status(500).json({ message: "❌ Erreur interne du serveur." });
+    res.status(500).json({ 
+      message: "❌ Erreur interne du serveur.",
+      error: error.message 
+    });
   }
 });
 
-// 🔹 SIMPLE LOGIN
-app.post("/api/login", (req, res) => {
+// 🔹 LOGIN USER - يقرأ من Firebase الحقيقي
+app.post("/api/login", async (req, res) => {
   try {
-    console.log("🔐 Login request received");
+    console.log("🔐 Login request received:", req.body);
     const { email, mot_de_passe } = req.body;
 
     if (!email || !mot_de_passe) {
@@ -150,20 +188,53 @@ app.post("/api/login", (req, res) => {
       });
     }
 
+    if (!db) {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible" 
+      });
+    }
+
+    // البحث في Firebase
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    const user = userDoc.data();
+    
+    // تحقق من كلمة المرور
+    const isPasswordValid = await bcrypt.compare(mot_de_passe, user.mot_de_passe);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        message: "❌ Mot de passe incorrect." 
+      });
+    }
+
+    console.log(`✅ Login successful: ${email}`);
+    
     res.status(200).json({
       message: "✅ Connexion réussie.",
       user: {
-        id: email,
-        nom: "Test User",
-        email: email,
-        role: "client"
+        id: userDoc.id,
+        nom: user.nom,
+        email: user.email,
+        role: user.role,
+        ville: user.ville || "",
+        telephone: user.telephone || ""
       },
-      firebase: db ? "ready" : "offline"
+      firebase: "authenticated"
     });
 
   } catch (error) {
     console.error("❌ Login error:", error);
-    res.status(500).json({ message: "❌ Erreur interne du serveur." });
+    res.status(500).json({ 
+      message: "❌ Erreur interne du serveur.",
+      error: error.message 
+    });
   }
 });
 
