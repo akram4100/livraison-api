@@ -70,7 +70,182 @@ try {
     console.error('💥 Firebase initialization failed:', error.message);
     db = null;
 }
+// ==============================================
+// 🔑 PASSWORD RESET ROUTES - ADD THESE
+// ==============================================
 
+// 🔹 SEND RESET CODE - مطلوب
+app.post("/api/send-reset-code", async (req, res) => {
+  try {
+    console.log("📧 Send reset code request:", req.body);
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ 
+        message: "❌ Email est requis." 
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible" 
+      });
+    }
+
+    // تحقق إذا المستخدم موجود
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      console.log("❌ User not found:", email);
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    const user = userDoc.data();
+    const userName = user.nom || "Utilisateur";
+
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiration = Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)); // 10 minutes
+
+    // Update user with reset code
+    await updateDoc(doc(db, "utilisateurs", email), {
+      reset_code: otp,
+      reset_expires: expiration
+    });
+
+    console.log(`🔐 Reset OTP for ${email}: ${otp}`);
+
+    // في الإنتاج الحقيقي، هنا نرسل إيميل
+    console.log(`📧 Reset code for ${email}: ${otp}`);
+    
+    res.status(200).json({ 
+      message: "✅ Code de réinitialisation généré avec succès.",
+      email: email,
+      reset_code: otp, // مؤقتاً نرجع الكود مباشرة
+      note: "En production, ce code serait envoyé par email"
+    });
+
+  } catch (error) {
+    console.error("❌ Send reset code error:", error);
+    res.status(500).json({ 
+      message: "❌ Erreur lors de l'envoi du code." 
+    });
+  }
+});
+
+// 🔹 VERIFY RESET CODE - مطلوب
+app.post("/api/verify-reset-code", async (req, res) => {
+  try {
+    console.log("🔍 Verify reset code request:", req.body);
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+      return res.status(400).json({ 
+        message: "❌ Email et code sont requis." 
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible" 
+      });
+    }
+
+    // Get user
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    const user = userDoc.data();
+
+    // Check reset code and expiration
+    if (!user.reset_code || user.reset_code !== code) {
+      return res.status(400).json({ 
+        message: "❌ Code de réinitialisation invalide." 
+      });
+    }
+
+    if (user.reset_expires.toDate() < new Date()) {
+      return res.status(400).json({ 
+        message: "❌ Code de réinitialisation expiré." 
+      });
+    }
+
+    console.log(`✅ Reset code verified for: ${email}`);
+    res.status(200).json({ 
+      message: "✅ Code vérifié avec succès.",
+      email: email
+    });
+
+  } catch (error) {
+    console.error("❌ Verify reset code error:", error);
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la vérification." 
+    });
+  }
+});
+
+// 🔹 RESET PASSWORD - مطلوب
+app.post("/api/reset-password", async (req, res) => {
+  try {
+    console.log("🔄 Reset password request:", req.body);
+    const { email, nouveauMotDePasse } = req.body;
+
+    if (!email || !nouveauMotDePasse) {
+      return res.status(400).json({ 
+        message: "❌ Email et nouveau mot de passe sont requis." 
+      });
+    }
+
+    if (nouveauMotDePasse.length < 6) {
+      return res.status(400).json({ 
+        message: "❌ Le mot de passe doit contenir au moins 6 caractères." 
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible" 
+      });
+    }
+
+    // Get user to verify existence
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(nouveauMotDePasse, 10);
+
+    // Update password and clear reset fields
+    await updateDoc(doc(db, "utilisateurs", email), {
+      mot_de_passe: hashedPassword,
+      reset_code: null,
+      reset_expires: null
+    });
+
+    console.log(`✅ Password reset successfully for: ${email}`);
+    res.status(200).json({ 
+      message: "✅ Mot de passe réinitialisé avec succès." 
+    });
+
+  } catch (error) {
+    console.error("❌ Reset password error:", error);
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la réinitialisation." 
+    });
+  }
+});
 // ==============================================
 // 🏥 BASIC ROUTES
 // ==============================================
