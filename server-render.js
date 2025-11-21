@@ -273,7 +273,7 @@ app.get("/api/health", (req, res) => {
 // ==============================================
 const bcrypt = require("bcryptjs");
 const { 
-  collection, doc, getDoc, getDocs, setDoc, 
+  collection, doc, getDoc, getDocs, setDoc, updateDoc,
   query, where, deleteDoc, Timestamp 
 } = require('firebase/firestore');
 
