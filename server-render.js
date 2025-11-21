@@ -160,24 +160,8 @@ app.post("/api/register", async (req, res) => {
 
     console.log(`✅ User saved to Firebase: ${email}`);
 
-    // 🔥 استخدام خدمة الإيميل المبسطة
-    const { sendVerificationCode } = require("./utils/emailService-simple.js");
-
-    const emailResult = await sendVerificationCode(
-      email,
-      "Code de vérification - Livraison Express",
-      verificationCode,
-      nom
-    );
-
-    if (!emailResult.ok) {
-      console.error("❌ Email service failed:", emailResult.error);
-      return res.status(500).json({ 
-        message: "❌ Service temporairement indisponible." 
-      });
-    }
-
-    console.log(`✅ Verification code generated for: ${email}`);
+    // 🔥 إرجاع الكود مباشرة بدون خدمة إيميل
+    console.log(`📧 Verification code for ${email}: ${verificationCode}`);
     
     res.status(200).json({ 
       message: "✅ Utilisateur enregistré avec succès!",
