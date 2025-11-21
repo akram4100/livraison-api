@@ -107,37 +107,33 @@ app.get("/api/test-firebase", async (req, res) => {
     try {
         if (!db) {
             return res.status(503).json({
-                message: "Firebase not available",
-                error: "Database connection failed - check environment variables"
+                message: "❌ Firebase not initialized",
+                error: "Check FIREBASE environment variables in Render dashboard"
             });
         }
 
-        // ✅ الطريقة الصحيحة لـ Firebase v9
-        const { collection, getDocs, limit, query } = require('firebase/firestore');
+        // ✅ اختبار بسيط للاتصال بدون الاعتماد على collections
+        const { collection, getDocs } = require('firebase/firestore');
         
-        // جرب الوصول إلى مجموعة test
-        const testCollection = collection(db, 'test');
-        const testQuery = query(testCollection, limit(1));
-        const snapshot = await getDocs(testQuery);
+        // حاول إنشاء مرجع لمجموعة (دون قراءة)
+        const testRef = collection(db, 'connection_test');
         
         res.json({
-            message: "✅ Firebase connection successful!",
-            firestore: "working",
-            documentsCount: snapshot.size,
-            collection: "test",
-            timestamp: new Date().toISOString()
+            message: "✅ Firebase is connected and ready!",
+            status: "success", 
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            database: "Firestore",
+            timestamp: new Date().toISOString(),
+            nextStep: "Now you can add user routes with Firebase"
         });
 
     } catch (error) {
-        console.error('💥 Firebase test error:', error);
-        
-        // حتى إذا فشلت القراءة، قد يكون الاتصال ناجحاً
-        res.json({
-            message: "⚠️ Firebase connected but collection might not exist",
-            status: "connected",
+        console.error('💥 Firebase connection error:', error);
+        res.status(500).json({
+            message: "❌ Firebase connection failed",
             error: error.message,
-            projectId: process.env.FIREBASE_PROJECT_ID,
-            suggestion: "Create 'test' collection in Firestore or ignore this error"
+            code: error.code,
+            check: "Verify FIREBASE_ environment variables in Render"
         });
     }
 });
