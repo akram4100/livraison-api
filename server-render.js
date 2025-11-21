@@ -168,22 +168,85 @@ app.use('*', (req, res) => {
     });
 });
 // ==============================================
-// 👤 USER ROUTES
+// 👤 BASIC USER ROUTES - SIMPLIFIED VERSION
 // ==============================================
-const { registerUser, loginUser, verifyEmailCode } = require("./controllers/userController-render.js");
+app.post("/api/register", async (req, res) => {
+  try {
+    const { nom, email, mot_de_passe, role } = req.body;
+    console.log("📥 Register request:", { nom, email, role });
 
-app.post("/api/register", registerUser);
-app.post("/api/login", loginUser);
-app.post("/api/verify-code", verifyEmailCode);
+    if (!nom || !email || !mot_de_passe || !role) {
+      return res.status(400).json({ 
+        message: "❌ Tous les champs sont obligatoires." 
+      });
+    }
+
+    res.json({
+      message: "✅ Registration endpoint is working!",
+      dataReceived: { nom, email, role },
+      nextStep: "Firebase integration will be added next"
+    });
+
+  } catch (error) {
+    console.error("❌ Register error:", error);
+    res.status(500).json({ message: "❌ Server error" });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, mot_de_passe } = req.body;
+    console.log("🔐 Login attempt for:", email);
+
+    if (!email || !mot_de_passe) {
+      return res.status(400).json({ 
+        message: "❌ Email et mot de passe sont requis." 
+      });
+    }
+
+    res.json({
+      message: "✅ Login endpoint is working!",
+      dataReceived: { email },
+      nextStep: "Firebase authentication will be added next"
+    });
+
+  } catch (error) {
+    console.error("❌ Login error:", error);
+    res.status(500).json({ message: "❌ Server error" });
+  }
+});
+
+app.post("/api/verify-code", async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    console.log("📩 Verification request:", { email, code });
+
+    if (!email || !code) {
+      return res.status(400).json({ 
+        message: "❌ Email et code sont requis." 
+      });
+    }
+
+    res.json({
+      message: "✅ Verification endpoint is working!",
+      dataReceived: { email, code },
+      nextStep: "Email verification logic will be added next"
+    });
+
+  } catch (error) {
+    console.error("❌ Verification error:", error);
+    res.status(500).json({ message: "❌ Server error" });
+  }
+});
 
 // Route لاختبار الـ routes الجديدة
 app.get("/api/user-test", (req, res) => {
   res.json({
     message: "✅ User routes are ready!",
     availableEndpoints: [
-      "POST /api/register",
-      "POST /api/login", 
-      "POST /api/verify-code"
+      "POST /api/register - Register new user",
+      "POST /api/login - User login", 
+      "POST /api/verify-code - Verify email code"
     ],
     status: "working"
   });
