@@ -116,7 +116,7 @@ app.get("/api/user-test", (req, res) => {
   });
 });
 
-// 🔹 REGISTER USER - يحفظ في Firebase الحقيقي
+// 🔹 REGISTER USER - مع إرسال إيميل حقيقي
 app.post("/api/register", async (req, res) => {
   try {
     console.log("📥 Register request received:", req.body);
@@ -159,12 +159,29 @@ app.post("/api/register", async (req, res) => {
     });
 
     console.log(`✅ User saved to Firebase: ${email}`);
+
+    // 🔥 إرسال إيميل حقيقي
+    const { sendEmail } = require("./utils/emailService-render.js");
+    const emailResult = await sendEmail(
+      email,
+      "Code de vérification - Livraison Express",
+      verificationCode,
+      nom
+    );
+
+    if (!emailResult.ok) {
+      console.error("❌ Email sending failed:", emailResult.error);
+      return res.status(500).json({ 
+        message: "❌ Erreur lors de l'envoi de l'email." 
+      });
+    }
+
+    console.log(`✅ Email sent to: ${email}`);
     
     res.status(200).json({ 
-      message: "✅ Utilisateur enregistré avec succès!",
+      message: "✅ Code de vérification envoyé à votre e-mail!",
       email: email,
-      code: verificationCode,
-      firebase: "saved_to_pending"
+      firebase: "saved_and_email_sent"
     });
 
   } catch (error) {
