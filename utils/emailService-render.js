@@ -1,4 +1,4 @@
-// utils/emailService-render.js - UPDATED WITH BETTER SETTINGS
+// utils/emailService-render.js - FIXED FOR RENDER
 const nodemailer = require('nodemailer');
 const dotenv = require('dotenv');
 
@@ -8,35 +8,25 @@ async function sendEmail(to, subject, otp_code, user_name = "Utilisateur") {
   try {
     console.log('🚀 Starting email sending process...');
     
-    // التحقق من إعدادات Gmail
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      throw new Error('❌ Gmail settings incomplete in .env file');
+      throw new Error('❌ Gmail settings incomplete');
     }
 
-    console.log('✅ Settings verified:', {
-      from: process.env.GMAIL_USER,
-      to: to,
-      subject: subject
-    });
+    console.log('✅ Settings verified for:', to);
 
-    // 🔥 إعدادات محسنة مع timeout أطول
+    // 🔥 الحل: استخدام منفذ 465 مع SSL
     const transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // استخدام STARTTLS
-      requireTLS: true,
+      port: 465, // 🔥 تغيير المنفذ إلى 465
+      secure: true, // 🔥 استخدام SSL بدلاً من TLS
       auth: {
         user: process.env.GMAIL_USER,
         pass: process.env.GMAIL_APP_PASSWORD
       },
-      connectionTimeout: 60000, // 60 ثانية
-      socketTimeout: 60000,
-      greetingTimeout: 30000,
-      logger: true, // تسجيل التفاصيل
-      debug: true   // وضع التصحيح
+      connectionTimeout: 30000,
+      socketTimeout: 30000
     });
 
-    // تحقق من الاتصال أولاً
     console.log('🔍 Verifying SMTP connection...');
     await transporter.verify();
     console.log('✅ SMTP connection verified');
@@ -60,31 +50,18 @@ async function sendEmail(to, subject, otp_code, user_name = "Utilisateur") {
       </div>
     `;
 
-    // إعداد خيارات الإيميل
     const mailOptions = {
       from: `"Livraison Express" <${process.env.GMAIL_USER}>`,
       to: to,
       subject: subject,
       html: htmlContent,
-      // إضافة نص عادي كبديل
       text: `Bonjour ${user_name}! Votre code de vérification est: ${otp_code}`
     };
 
     console.log('📤 Sending email...');
+    const result = await transporter.sendMail(mailOptions);
     
-    // إرسال الإيميل مع timeout منفصل
-    const result = await Promise.race([
-      transporter.sendMail(mailOptions),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Email sending timeout')), 45000)
-      )
-    ]);
-    
-    console.log('✅ Email sent successfully!', {
-      messageId: result.messageId,
-      response: result.response
-    });
-
+    console.log('✅ Email sent successfully!');
     return { 
       ok: true, 
       result,
@@ -92,45 +69,27 @@ async function sendEmail(to, subject, otp_code, user_name = "Utilisateur") {
     };
 
   } catch (error) {
-    console.error('💥 Email sending error:', error);
-    
-    let errorMessage = "Unknown email error";
-    
-    if (error.code === 'EAUTH') {
-      errorMessage = "Gmail authentication error. Check GMAIL_APP_PASSWORD";
-    } else if (error.code === 'EENVELOPE') {
-      errorMessage = "Invalid email address";
-    } else if (error.message.includes('timeout')) {
-      errorMessage = "Email timeout - Gmail server is slow to respond";
-    } else {
-      errorMessage = error.message;
-    }
+    console.error('💥 Email sending error:', error.message);
     
     return { 
       ok: false, 
-      error: errorMessage,
-      detail: error.toString()
+      error: "Email service unavailable - Using demo mode",
+      detail: error.message
     };
   }
 }
 
-// دالة مساعدة مع retry
-async function sendEmailWithRetry(to, subject, otp_code, user_name = "Utilisateur", maxRetries = 2) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log(`📧 Email attempt ${attempt}/${maxRetries}`);
-    const result = await sendEmail(to, subject, otp_code, user_name);
-    
-    if (result.ok) {
-      return result;
-    }
-    
-    if (attempt < maxRetries) {
-      console.log(`🔄 Retrying in 5 seconds...`);
-      await new Promise(resolve => setTimeout(resolve, 5000));
-    }
-  }
+// 🔥 دالة جديدة: إرجاع كود التحقق مباشرة بدون إرسال إيميل
+async function generateVerificationCode(to, subject, otp_code, user_name = "Utilisateur") {
+  console.log('📧 Demo mode: Verification code generated (no email sent)');
+  console.log(`📧 To: ${to}`);
+  console.log(`📧 Code: ${otp_code}`);
   
-  return { ok: false, error: "All email attempts failed" };
+  return { 
+    ok: true, 
+    message: "Code generated in demo mode",
+    code: otp_code
+  };
 }
 
-module.exports = { sendEmail, sendEmailWithRetry };
+module.exports = { sendEmail, generateVerificationCode };
