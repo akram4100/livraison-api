@@ -21,12 +21,18 @@ async function sendEmail(to, subject, otp_code, user_name = "Utilisateur") {
 
     // إنشاء Nodemailer transporter
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD
-      }
-    });
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // استخدام TLS
+  requireTLS: true,
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD
+  },
+  connectionTimeout: 60000, // 60 ثانية
+  socketTimeout: 60000,
+  greetingTimeout: 30000
+});
 
     // محتوى الإيميل
     const htmlContent = `
