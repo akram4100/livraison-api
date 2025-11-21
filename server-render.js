@@ -112,9 +112,12 @@ app.get("/api/test-firebase", async (req, res) => {
             });
         }
 
-        // جرب قراءة بسيطة من Firestore
-        const testRef = db.collection('test');
-        const snapshot = await testRef.limit(1).get();
+        // ✅ الطريقة الصحيحة لـ Firebase v9
+        const { collection, getDocs, limit, query } = require('firebase/firestore');
+        
+        const testCollection = collection(db, 'test');
+        const testQuery = query(testCollection, limit(1));
+        const snapshot = await getDocs(testQuery);
         
         res.json({
             message: "✅ Firebase test successful",
@@ -127,7 +130,8 @@ app.get("/api/test-firebase", async (req, res) => {
         console.error('💥 Firebase test error:', error);
         res.status(500).json({
             message: "Firebase test failed",
-            error: error.message
+            error: error.message,
+            code: error.code
         });
     }
 });
