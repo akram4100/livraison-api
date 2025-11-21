@@ -167,7 +167,27 @@ app.use('*', (req, res) => {
         path: req.originalUrl
     });
 });
+// ==============================================
+// 👤 USER ROUTES
+// ==============================================
+const { registerUser, loginUser, verifyEmailCode } = require("./controllers/userController-render.js");
 
+app.post("/api/register", registerUser);
+app.post("/api/login", loginUser);
+app.post("/api/verify-code", verifyEmailCode);
+
+// Route لاختبار الـ routes الجديدة
+app.get("/api/user-test", (req, res) => {
+  res.json({
+    message: "✅ User routes are ready!",
+    availableEndpoints: [
+      "POST /api/register",
+      "POST /api/login", 
+      "POST /api/verify-code"
+    ],
+    status: "working"
+  });
+});
 // ==============================================
 // 🚀 START SERVER
 // ==============================================
