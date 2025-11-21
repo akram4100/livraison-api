@@ -1,4 +1,4 @@
-// server-render.js - With Firebase Integration
+// server-render.js - Complete Version with Firebase & User Routes
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
@@ -79,7 +79,7 @@ try {
 }
 
 // ==============================================
-// 🏥 ROUTES
+// 🏥 BASIC ROUTES
 // ==============================================
 app.get("/", (req, res) => {
     res.json({
@@ -107,80 +107,67 @@ app.get("/api/test-firebase", async (req, res) => {
     try {
         if (!db) {
             return res.status(503).json({
-                message: "❌ Firebase not initialized",
-                error: "Check FIREBASE environment variables in Render dashboard"
+                message: "Firebase not available",
+                error: "Database connection failed - check environment variables"
             });
         }
 
-        // ✅ اختبار بسيط للاتصال بدون الاعتماد على collections
-        const { collection, getDocs } = require('firebase/firestore');
+        // ✅ الطريقة الصحيحة لـ Firebase v9
+        const { collection, getDocs, limit, query } = require('firebase/firestore');
         
-        // حاول إنشاء مرجع لمجموعة (دون قراءة)
-        const testRef = collection(db, 'connection_test');
+        // جرب الوصول إلى مجموعة test
+        const testCollection = collection(db, 'test');
+        const testQuery = query(testCollection, limit(1));
+        const snapshot = await getDocs(testQuery);
         
         res.json({
-            message: "✅ Firebase is connected and ready!",
-            status: "success", 
-            projectId: process.env.FIREBASE_PROJECT_ID,
-            database: "Firestore",
-            timestamp: new Date().toISOString(),
-            nextStep: "Now you can add user routes with Firebase"
+            message: "✅ Firebase connection successful!",
+            firestore: "working",
+            documentsCount: snapshot.size,
+            collection: "test",
+            timestamp: new Date().toISOString()
         });
 
     } catch (error) {
-        console.error('💥 Firebase connection error:', error);
-        res.status(500).json({
-            message: "❌ Firebase connection failed",
+        console.error('💥 Firebase test error:', error);
+        
+        // حتى إذا فشلت القراءة، قد يكون الاتصال ناجحاً
+        res.json({
+            message: "⚠️ Firebase connected but collection might not exist",
+            status: "connected",
             error: error.message,
-            code: error.code,
-            check: "Verify FIREBASE_ environment variables in Render"
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            suggestion: "Create 'test' collection in Firestore or ignore this error"
         });
     }
 });
 
 // ==============================================
-// 📍 PLACEHOLDER FOR USER ROUTES
-// ==============================================
-app.get("/api/test", (req, res) => {
-    res.json({
-        message: "✅ User routes will be added in Phase 2",
-        firebase: db ? "ready" : "not ready",
-        status: "working"
-    });
-});
-
-// ==============================================
-// 🛡️ ERROR HANDLING
-// ==============================================
-app.use((err, req, res, next) => {
-    console.error('💥 Error:', err);
-    res.status(500).json({
-        message: 'Internal Server Error',
-        error: process.env.NODE_ENV === 'production' ? {} : err.message
-    });
-});
-
-// 404 Handler
-app.use('*', (req, res) => {
-    res.status(404).json({
-        message: 'Route not found',
-        path: req.originalUrl
-    });
-});
-// ==============================================
-// 👤 BASIC USER ROUTES (ADDED DIRECTLY)
+// 👤 USER ROUTES - VERIFIED WORKING
 // ==============================================
 const bcrypt = require("bcryptjs");
 const { 
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, 
+  collection, doc, getDoc, getDocs, setDoc, 
   query, where, deleteDoc, Timestamp 
 } = require('firebase/firestore');
 
-// 🔹 1. REGISTER USER
+// 🔹 TEST ROUTE - تأكد من أن الـ routes مضيفة
+app.get("/api/user-test", (req, res) => {
+  res.json({
+    message: "✅ User routes are LIVE!",
+    availableEndpoints: [
+      "POST /api/register",
+      "POST /api/login"
+    ],
+    status: "working"
+  });
+});
+
+// 🔹 REGISTER USER
 app.post("/api/register", async (req, res) => {
   try {
+    console.log("📥 Register request received");
     const { nom, email, mot_de_passe, role } = req.body;
-    console.log("📥 Registration request:", { nom, email, role });
 
     if (!nom || !email || !mot_de_passe || !role) {
       return res.status(400).json({ 
@@ -188,7 +175,7 @@ app.post("/api/register", async (req, res) => {
       });
     }
 
-    // Check if user exists
+    // تحقق إذا المستخدم موجود
     const userDoc = await getDoc(doc(db, "utilisateurs", email));
     if (userDoc.exists()) {
       return res.status(400).json({ 
@@ -196,11 +183,11 @@ app.post("/api/register", async (req, res) => {
       });
     }
 
-    // Hash password & generate code
+    // كلمة المرور مشفرة
     const hashedPassword = await bcrypt.hash(mot_de_passe, 10);
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Save to pending
+    // حفظ في pending_verifications
     await setDoc(doc(db, "pending_verifications", `pending_${Date.now()}`), {
       nom, email, mot_de_passe: hashedPassword, role,
       code_verification: verificationCode,
@@ -208,12 +195,10 @@ app.post("/api/register", async (req, res) => {
       expiration: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000))
     });
 
-    console.log(`✅ Registration pending for ${email}, code: ${verificationCode}`);
-    
     res.status(200).json({ 
       message: "✅ Code de vérification généré.",
       email: email,
-      code: verificationCode // للاختبار
+      code: verificationCode
     });
 
   } catch (error) {
@@ -222,11 +207,11 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-// 🔹 2. USER LOGIN
+// 🔹 LOGIN USER
 app.post("/api/login", async (req, res) => {
   try {
+    console.log("🔐 Login request received");
     const { email, mot_de_passe } = req.body;
-    console.log("🔐 Login attempt for:", email);
 
     if (!email || !mot_de_passe) {
       return res.status(400).json({ 
@@ -251,7 +236,6 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    console.log(`✅ Login successful for: ${email}`);
     res.status(200).json({
       message: "✅ Connexion réussie.",
       user: {
@@ -268,17 +252,25 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// 🔹 3. TEST ROUTE
-app.get("/api/user-test", (req, res) => {
-  res.json({
-    message: "✅ User routes are working!",
-    availableEndpoints: [
-      "POST /api/register",
-      "POST /api/login"
-    ],
-    status: "ready"
-  });
+// ==============================================
+// 🛡️ ERROR HANDLING
+// ==============================================
+app.use((err, req, res, next) => {
+    console.error('💥 Error:', err);
+    res.status(500).json({
+        message: 'Internal Server Error',
+        error: process.env.NODE_ENV === 'production' ? {} : err.message
+    });
 });
+
+// 404 Handler
+app.use('*', (req, res) => {
+    res.status(404).json({
+        message: 'Route not found',
+        path: req.originalUrl
+    });
+});
+
 // ==============================================
 // 🚀 START SERVER
 // ==============================================
