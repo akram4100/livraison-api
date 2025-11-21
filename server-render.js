@@ -1,7 +1,9 @@
-// server-render.js - CommonJS version for Render
+// server-render.js - With Firebase Integration
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const { initializeApp, getApps } = require('firebase/app');
+const { getFirestore } = require('firebase/firestore');
 
 // Load environment variables
 dotenv.config();
@@ -31,14 +33,61 @@ app.use((req, res, next) => {
 });
 
 // ==============================================
-// 🏥 BASIC ROUTES
+// 🔥 FIREBASE INITIALIZATION
+// ==============================================
+let db;
+
+try {
+    console.log('🔥 Initializing Firebase...');
+    
+    const firebaseConfig = {
+        apiKey: process.env.FIREBASE_API_KEY,
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+        appId: process.env.FIREBASE_APP_ID
+    };
+
+    console.log('🔧 Firebase Config:', {
+        projectId: firebaseConfig.projectId,
+        authDomain: firebaseConfig.authDomain
+    });
+
+    // Validate required Firebase config
+    if (!firebaseConfig.apiKey) {
+        throw new Error('Missing FIREBASE_API_KEY in environment variables');
+    }
+
+    const existingApps = getApps();
+    let firebaseApp;
+    
+    if (existingApps.length === 0) {
+        firebaseApp = initializeApp(firebaseConfig);
+        console.log('✅ New Firebase app initialized');
+    } else {
+        firebaseApp = existingApps[0];
+        console.log('✅ Using existing Firebase app');
+    }
+    
+    db = getFirestore(firebaseApp);
+    console.log('📡 Firebase Firestore connected successfully');
+
+} catch (error) {
+    console.error('💥 Firebase initialization failed:', error.message);
+    db = null;
+}
+
+// ==============================================
+// 🏥 ROUTES
 // ==============================================
 app.get("/", (req, res) => {
     res.json({
         message: "🚀 Livraison Express API is running on Render!",
         status: "operational",
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || "development"
+        environment: process.env.NODE_ENV || "development",
+        firebase: db ? "connected" : "disconnected"
     });
 });
 
@@ -46,8 +95,41 @@ app.get("/api/health", (req, res) => {
     res.json({
         status: "healthy",
         timestamp: new Date().toISOString(),
-        database: "Firebase (to be added)"
+        database: db ? "Firebase Connected" : "Firebase Disconnected",
+        firebaseProject: process.env.FIREBASE_PROJECT_ID || "Not configured"
     });
+});
+
+// ==============================================
+// 🔥 TEST FIREBASE ROUTE
+// ==============================================
+app.get("/api/test-firebase", async (req, res) => {
+    try {
+        if (!db) {
+            return res.status(503).json({
+                message: "Firebase not available",
+                error: "Database connection failed"
+            });
+        }
+
+        // جرب قراءة بسيطة من Firestore
+        const testRef = db.collection('test');
+        const snapshot = await testRef.limit(1).get();
+        
+        res.json({
+            message: "✅ Firebase test successful",
+            firestore: "working",
+            documentsCount: snapshot.size,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('💥 Firebase test error:', error);
+        res.status(500).json({
+            message: "Firebase test failed",
+            error: error.message
+        });
+    }
 });
 
 // ==============================================
@@ -55,7 +137,8 @@ app.get("/api/health", (req, res) => {
 // ==============================================
 app.get("/api/test", (req, res) => {
     res.json({
-        message: "✅ User routes will be added soon",
+        message: "✅ User routes will be added in Phase 2",
+        firebase: db ? "ready" : "not ready",
         status: "working"
     });
 });
@@ -90,9 +173,10 @@ app.listen(PORT, '0.0.0.0', () => {
 ✅ Server successfully started!
 📍 Port: ${PORT}
 🌐 Environment: ${process.env.NODE_ENV || "development"}
-🔥 Ready for Firebase integration
+🔥 Firebase: ${db ? "Connected ✅" : "Disconnected ❌"}
+📧 Email: ${process.env.GMAIL_USER ? "Ready" : "Not configured"}
 =========================================
     `);
 });
 
-module.exports = app;
+module.exports = { app, db };

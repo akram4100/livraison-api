@@ -1,7 +1,7 @@
 {
   "name": "livraison-api",
   "version": "1.0.0",
-  "type": "commonjs", 
+  "type": "commonjs",
   "main": "server-render.js",
   "scripts": {
     "start": "node server-render.js",
