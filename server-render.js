@@ -116,7 +116,7 @@ app.get("/api/user-test", (req, res) => {
   });
 });
 
-// 🔹 REGISTER USER - مع إرسال إيميل حقيقي
+// 🔹 REGISTER USER - يحفظ في Firebase الحقيقي
 app.post("/api/register", async (req, res) => {
   try {
     console.log("📥 Register request received:", req.body);
@@ -160,50 +160,31 @@ app.post("/api/register", async (req, res) => {
 
     console.log(`✅ User saved to Firebase: ${email}`);
 
-    // 🔥 محاولة إرسال إيميل حقيقي، إذا فشل نستخدم الوضع التجريبي
-const { sendEmail, generateVerificationCode } = require("./utils/emailService-render.js");
+    // 🔥 استخدام خدمة الإيميل المبسطة
+    const { sendVerificationCode } = require("./utils/emailService-simple.js");
 
-let emailResult;
-try {
-  emailResult = await sendEmail(
-    email,
-    "Code de vérification - Livraison Express",
-    verificationCode,
-    nom
-  );
-  
-  if (!emailResult.ok) {
-    // إذا فشل الإرسال، استخدم الوضع التجريبي
-    emailResult = await generateVerificationCode(
+    const emailResult = await sendVerificationCode(
       email,
-      "Code de vérification - Livraison Express", 
+      "Code de vérification - Livraison Express",
       verificationCode,
       nom
     );
-  }
-} catch (error) {
-  // إذا كان هناك خطأ، استخدم الوضع التجريبي
-  emailResult = await generateVerificationCode(
-    email,
-    "Code de vérification - Livraison Express",
-    verificationCode, 
-    nom
-  );
-}
 
     if (!emailResult.ok) {
-      console.error("❌ Email sending failed:", emailResult.error);
+      console.error("❌ Email service failed:", emailResult.error);
       return res.status(500).json({ 
-        message: "❌ Erreur lors de l'envoi de l'email." 
+        message: "❌ Service temporairement indisponible." 
       });
     }
 
-    console.log(`✅ Email sent to: ${email}`);
+    console.log(`✅ Verification code generated for: ${email}`);
     
     res.status(200).json({ 
-      message: "✅ Code de vérification envoyé à votre e-mail!",
+      message: "✅ Utilisateur enregistré avec succès!",
       email: email,
-      firebase: "saved_and_email_sent"
+      verification_code: verificationCode,
+      note: "Utilisez ce code pour vérifier votre compte",
+      firebase: "saved"
     });
 
   } catch (error) {
@@ -277,6 +258,86 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+// 🔹 VERIFY EMAIL CODE - جديد
+app.post("/api/verify-code", async (req, res) => {
+  try {
+    console.log("📩 Verify code request:", req.body);
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+      return res.status(400).json({ 
+        message: "❌ Email et code sont requis." 
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ 
+        message: "❌ Service temporairement indisponible" 
+      });
+    }
+
+    // البحث في pending_verifications
+    const pendingQuery = query(
+      collection(db, "pending_verifications"), 
+      where("email", "==", email),
+      where("code_verification", "==", code)
+    );
+    
+    const pendingSnapshot = await getDocs(pendingQuery);
+
+    if (pendingSnapshot.empty) {
+      return res.status(400).json({ 
+        message: "❌ Code invalide ou expiré." 
+      });
+    }
+
+    const pendingData = pendingSnapshot.docs[0].data();
+    const pendingRef = pendingSnapshot.docs[0].ref;
+
+    // تحقق من انتهاء الصلاحية
+    if (pendingData.expiration.toDate() < new Date()) {
+      await deleteDoc(pendingRef);
+      return res.status(400).json({ 
+        message: "❌ Code expiré." 
+      });
+    }
+
+    // نقل المستخدم إلى utilisateurs
+    await setDoc(doc(db, "utilisateurs", email), {
+      nom: pendingData.nom,
+      email: pendingData.email,
+      mot_de_passe: pendingData.mot_de_passe,
+      role: pendingData.role,
+      verified: true,
+      date_creation: Timestamp.now(),
+      telephone: "",
+      ville: ""
+    });
+
+    // حذف من pending
+    await deleteDoc(pendingRef);
+
+    console.log(`✅ User verified: ${email}`);
+    
+    res.status(200).json({ 
+      message: "✅ Email vérifié avec succès !",
+      user: {
+        nom: pendingData.nom,
+        email: pendingData.email,
+        role: pendingData.role
+      },
+      firebase: "verified"
+    });
+
+  } catch (error) {
+    console.error("❌ Verification error:", error);
+    res.status(500).json({ 
+      message: "❌ Erreur lors de la vérification.",
+      error: error.message 
+    });
+  }
+});
+
 // ==============================================
 // 🛡️ ERROR HANDLING
 // ==============================================
@@ -308,6 +369,7 @@ app.listen(PORT, '0.0.0.0', () => {
 📍 Port: ${PORT}
 🌐 Environment: ${process.env.NODE_ENV || "development"}
 🔥 Firebase: ${db ? "Connected ✅" : "Disconnected ❌"}
+📧 Email: Simple Mode (Code returned directly)
 =========================================
     `);
 });
