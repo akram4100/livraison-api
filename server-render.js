@@ -161,13 +161,15 @@ app.post("/api/register", async (req, res) => {
     console.log(`✅ User saved to Firebase: ${email}`);
 
     // 🔥 إرسال إيميل حقيقي
-    const { sendEmail } = require("./utils/emailService-render.js");
-    const emailResult = await sendEmail(
-      email,
-      "Code de vérification - Livraison Express",
-      verificationCode,
-      nom
-    );
+// 🔥 إرسال إيميل حقيقي مع إعادة المحاولة
+const { sendEmailWithRetry } = require("./utils/emailService-render.js");
+const emailResult = await sendEmailWithRetry(
+  email,
+  "Code de vérification - Livraison Express",
+  verificationCode,
+  nom,
+  2  // عدد المحاولات (2 محاولات)
+);
 
     if (!emailResult.ok) {
       console.error("❌ Email sending failed:", emailResult.error);
