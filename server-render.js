@@ -335,25 +335,51 @@ app.post("/api/register", async (req, res) => {
 
     console.log(`✅ User saved to Firebase: ${email}`);
 
-    // 🔥 إرجاع الكود مباشرة بدون خدمة إيميل
-    console.log(`📧 Verification code for ${email}: ${verificationCode}`);
+// 🔥 إرسال إيميل حقيقي مع إعادة المحاولة
+try {
+  const { sendEmailWithRetry } = require("./utils/emailService-render.js");
+  const emailResult = await sendEmailWithRetry(
+    email,
+    "Code de vérification - Livraison Express",
+    verificationCode,
+    nom,
+    2  // محاولتين
+  );
+
+  if (!emailResult.ok) {
+    console.error("❌ Email sending failed:", emailResult.error);
     
+    // حتى إذا فشل الإيميل، نرجع الكود للعميل
     res.status(200).json({ 
-      message: "✅ Utilisateur enregistré avec succès!",
+      message: "✅ Utilisateur enregistré - Code généré",
       email: email,
       verification_code: verificationCode,
-      note: "Utilisez ce code pour vérifier votre compte",
+      note: "Utilisez ce code pour vérifier votre compte (Email service temporairement indisponible)",
       firebase: "saved"
     });
-
-  } catch (error) {
-    console.error("❌ Registration error:", error);
-    res.status(500).json({ 
-      message: "❌ Erreur interne du serveur.",
-      error: error.message 
-    });
+    return;
   }
-});
+
+  console.log(`✅ Email sent successfully to: ${email}`);
+
+  res.status(200).json({ 
+    message: "✅ Code de vérification envoyé à votre e-mail!",
+    email: email,
+    firebase: "saved_and_email_sent"
+  });
+
+} catch (emailError) {
+  console.error("❌ Email service error:", emailError);
+  
+  // إذا فشلت خدمة الإيميل كلياً، نرجع الكود
+  res.status(200).json({ 
+    message: "✅ Utilisateur enregistré avec succès!",
+    email: email,
+    verification_code: verificationCode,
+    note: "Utilisez ce code pour vérifier votre compte",
+    firebase: "saved"
+  });
+}
 
 // 🔹 LOGIN USER - يقرأ من Firebase الحقيقي
 app.post("/api/login", async (req, res) => {
