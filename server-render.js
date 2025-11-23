@@ -566,7 +566,301 @@ app.post("/api/reset-password", async (req, res) => {
     });
   }
 });
+// ==============================================
+// 🔐 QR CODE LOGIN SYSTEM
+// ==============================================
 
+// 🔹 GENERATE QR SESSION
+app.post("/api/generate-qr-session", async (req, res) => {
+  try {
+    console.log("🎯 Generating QR session...");
+    
+    const sessionId = 'qr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const expiration = Timestamp.fromDate(new Date(Date.now() + 5 * 60 * 1000)); // 5 minutes
+    
+    // Create QR session in Firebase
+    await setDoc(doc(db, "qr_sessions", sessionId), {
+      id: sessionId,
+      status: "waiting", // waiting, scanned, confirmed, expired
+      created_at: Timestamp.now(),
+      expires_at: expiration,
+      user_data: null,
+      mobile_device: null
+    });
+
+    // Create QR data
+    const qrData = {
+      type: 'livraison_login',
+      session_id: sessionId,
+      base_url: "https://livraison-api-x45n.onrender.com",
+      timestamp: Date.now(),
+      action: 'mobile_login'
+    };
+
+    console.log(`✅ QR session created: ${sessionId}`);
+    
+    res.status(200).json({
+      message: "✅ QR session generated",
+      session_id: sessionId,
+      qr_data: qrData,
+      qr_url: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}`,
+      expires_at: expiration.toDate()
+    });
+
+  } catch (error) {
+    console.error("❌ QR session generation error:", error);
+    res.status(500).json({ 
+      message: "❌ Error generating QR session" 
+    });
+  }
+});
+
+// 🔹 CHECK QR SESSION STATUS
+app.get("/api/check-qr-session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log(`🔍 Checking QR session: ${sessionId}`);
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // Check expiration
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", sessionId), {
+        status: "expired"
+      });
+      
+      return res.status(400).json({ 
+        message: "❌ Session expired" 
+      });
+    }
+
+    res.status(200).json({
+      session_id: sessionId,
+      status: sessionData.status,
+      user_data: sessionData.user_data,
+      created_at: sessionData.created_at,
+      expires_at: sessionData.expires_at
+    });
+
+  } catch (error) {
+    console.error("❌ Check QR session error:", error);
+    res.status(500).json({ 
+      message: "❌ Error checking session" 
+    });
+  }
+});
+
+// 🔹 MOBILE: SCAN QR CODE
+app.post("/api/mobile/scan-qr", async (req, res) => {
+  try {
+    const { session_id, device_info } = req.body;
+    console.log(`📱 Mobile scan QR: ${session_id}`);
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // Check expiration
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "expired"
+      });
+      
+      return res.status(400).json({ 
+        message: "❌ Session expired" 
+      });
+    }
+
+    // Update session status
+    await updateDoc(doc(db, "qr_sessions", session_id), {
+      status: "scanned",
+      mobile_device: device_info,
+      scanned_at: Timestamp.now()
+    });
+
+    console.log(`✅ QR code scanned by mobile: ${session_id}`);
+    
+    res.status(200).json({
+      message: "✅ QR code scanned successfully",
+      session_id: session_id,
+      status: "scanned"
+    });
+
+  } catch (error) {
+    console.error("❌ Mobile scan error:", error);
+    res.status(500).json({ 
+      message: "❌ Error scanning QR" 
+    });
+  }
+});
+
+// 🔹 MOBILE: CONFIRM LOGIN
+app.post("/api/mobile/confirm-login", async (req, res) => {
+  try {
+    const { session_id, email, mot_de_passe } = req.body;
+    console.log(`🔐 Mobile confirm login: ${session_id}, ${email}`);
+
+    // First verify user credentials
+    const userDoc = await getDoc(doc(db, "utilisateurs", email));
+    
+    if (!userDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Utilisateur introuvable." 
+      });
+    }
+
+    const user = userDoc.data();
+    const isPasswordValid = await bcrypt.compare(mot_de_passe, user.mot_de_passe);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        message: "❌ Mot de passe incorrect." 
+      });
+    }
+
+    // Check session
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "expired"
+      });
+      
+      return res.status(400).json({ 
+        message: "❌ Session expired" 
+      });
+    }
+
+    // Prepare user data (without sensitive info)
+    const userData = {
+      id: userDoc.id,
+      nom: user.nom,
+      email: user.email,
+      role: user.role,
+      ville: user.ville || "",
+      telephone: user.telephone || ""
+    };
+
+    // Update session with user data
+    await updateDoc(doc(db, "qr_sessions", session_id), {
+      status: "confirmed",
+      user_data: userData,
+      confirmed_at: Timestamp.now()
+    });
+
+    console.log(`✅ Login confirmed for session: ${session_id}`);
+    
+    res.status(200).json({
+      message: "✅ Login confirmed successfully",
+      session_id: session_id,
+      user: userData,
+      status: "confirmed"
+    });
+
+  } catch (error) {
+    console.error("❌ Mobile confirm login error:", error);
+    res.status(500).json({ 
+      message: "❌ Error confirming login" 
+    });
+  }
+});
+// ==============================================
+// 🔐 QR CODE ENDPOINTS 
+// ==============================================
+
+// 🔹 إنشاء QR code للتسجيل
+app.post("/api/generate-qr", async (req, res) => {
+  try {
+    const { session_id } = req.body;
+    console.log("🎯 Generating QR code for session:", session_id);
+
+    if (!session_id) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Session ID is required" 
+      });
+    }
+
+    // إنشاء بيانات QR
+    const qrData = {
+      type: 'livraison_login',
+      session_id: session_id,
+      base_url: "https://livraison-api-x45n.onrender.com",
+      timestamp: Date.now(),
+      action: 'mobile_login',
+      app_name: 'Livraison Express'
+    };
+
+    // إنشاء رابط QR
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(JSON.stringify(qrData))}&format=png&margin=10`;
+
+    console.log("✅ QR code generated successfully for session:", session_id);
+    
+    res.status(200).json({
+      success: true,
+      qr_url: qrUrl,
+      session_id: session_id,
+      message: "QR code generated successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ QR generation error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error" 
+    });
+  }
+});
+
+// 🔹 التحقق من حالة جلسة QR
+app.get("/api/check-qr-session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log("🔍 Checking QR session:", sessionId);
+
+    // محاكاة مؤقتة - سترتبط مع Firebase لاحقاً
+    const mockSession = {
+      session_id: sessionId,
+      status: "waiting", // waiting, scanned, confirmed
+      user_data: null,
+      created_at: new Date().toISOString()
+    };
+
+    res.status(200).json({
+      success: true,
+      session: mockSession
+    });
+
+  } catch (error) {
+    console.error("❌ Session check error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error" 
+    });
+  }
+});
 // ==============================================
 // 🛡️ ERROR HANDLING
 // ==============================================
