@@ -922,6 +922,196 @@ app.post("/api/generate-dashboard-qr", async (req, res) => {
   }
 });
 // ==============================================
+// 🔍 QR SYSTEM DIAGNOSTICS & LOGGING
+// ==============================================
+
+// 🔹 تشخيص حالة Firebase وجلسات QR
+app.get("/api/qr-diagnostics", async (req, res) => {
+  try {
+    console.log("🔍 QR Diagnostics requested");
+    
+    const diagnostics = {
+      timestamp: new Date().toISOString(),
+      firebase_status: db ? "connected" : "disconnected",
+      firebase_project: process.env.FIREBASE_PROJECT_ID || "not_configured",
+      environment: process.env.NODE_ENV || "development",
+      server_time: new Date().toISOString(),
+      endpoints_available: [
+        "POST /api/create-qr-session",
+        "GET /api/qr-session/:id", 
+        "POST /api/mobile/scan-qr",
+        "POST /api/mobile/confirm-login"
+      ]
+    };
+
+    // التحقق من وجود جلسات نشطة
+    if (db) {
+      try {
+        const qrSessionsQuery = query(collection(db, "qr_sessions"));
+        const snapshot = await getDocs(qrSessionsQuery);
+        diagnostics.active_sessions = snapshot.size;
+        diagnostics.sessions_sample = [];
+        
+        snapshot.forEach(doc => {
+          const session = doc.data();
+          diagnostics.sessions_sample.push({
+            id: session.session_id,
+            status: session.status,
+            type: session.type,
+            created: session.created_at?.toDate?.() || session.created_at,
+            expires: session.expires_at?.toDate?.() || session.expires_at
+          });
+        });
+      } catch (firestoreError) {
+        diagnostics.firestore_error = firestoreError.message;
+      }
+    }
+
+    console.log("✅ Diagnostics completed:", diagnostics);
+    
+    res.status(200).json({
+      success: true,
+      diagnostics: diagnostics
+    });
+
+  } catch (error) {
+    console.error("❌ Diagnostics error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 🔹 سجل تفصيلي لإنشاء جلسة QR
+app.post("/api/debug/create-qr-session", async (req, res) => {
+  try {
+    console.log("🎯 DEBUG: Creating QR session with details:", req.body);
+    
+    const { type = "login", debug_info = {} } = req.body;
+    
+    const sessionId = 'qr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const createdAt = Timestamp.now();
+    const expiresAt = Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
+
+    const sessionData = {
+      id: sessionId,
+      session_id: sessionId,
+      type: type,
+      status: "waiting",
+      created_at: createdAt,
+      expires_at: expiresAt,
+      user_data: null,
+      mobile_device: null,
+      scanned_at: null,
+      confirmed_at: null,
+      debug_info: {
+        client_timestamp: debug_info.timestamp || Date.now(),
+        user_agent: req.headers['user-agent'],
+        source: debug_info.source || 'unknown'
+      }
+    };
+
+    console.log("📝 Session data to save:", sessionData);
+
+    await setDoc(doc(db, "qr_sessions", sessionId), sessionData);
+    console.log("✅ DEBUG: Session saved to Firestore");
+
+    // إنشاء QR code
+    const qrData = {
+      type: 'livraison_qr',
+      session_id: sessionId,
+      action: type,
+      timestamp: Date.now(),
+      app_name: 'Livraison Express',
+      base_url: "https://livraison-api-x45n.onrender.com",
+      debug: true
+    };
+
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}&format=png&margin=10`;
+
+    console.log("🎉 DEBUG: QR session created successfully:", {
+      session_id: sessionId,
+      qr_url: qrUrl,
+      expires_at: expiresAt.toDate()
+    });
+
+    res.status(200).json({
+      success: true,
+      session_id: sessionId,
+      qr_url: qrUrl,
+      qr_data: qrData,
+      expires_at: expiresAt.toDate(),
+      debug_info: {
+        firestore_saved: true,
+        session_created: createdAt.toDate(),
+        session_expires: expiresAt.toDate()
+      },
+      message: "QR session created with debug info"
+    });
+
+  } catch (error) {
+    console.error("❌ DEBUG: Create QR session error:", {
+      error: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// 🔹 سجل جميع جلسات QR (للتشخيص)
+app.get("/api/debug/qr-sessions", async (req, res) => {
+  try {
+    console.log("🔍 DEBUG: Listing all QR sessions");
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: "Firebase not connected"
+      });
+    }
+
+    const qrSessionsQuery = query(collection(db, "qr_sessions"));
+    const snapshot = await getDocs(qrSessionsQuery);
+    
+    const sessions = [];
+    snapshot.forEach(doc => {
+      const session = doc.data();
+      sessions.push({
+        id: doc.id,
+        ...session,
+        created_at: session.created_at?.toDate?.() || session.created_at,
+        expires_at: session.expires_at?.toDate?.() || session.expires_at,
+        scanned_at: session.scanned_at?.toDate?.() || session.scanned_at,
+        confirmed_at: session.confirmed_at?.toDate?.() || session.confirmed_at
+      });
+    });
+
+    console.log(`📊 DEBUG: Found ${sessions.length} QR sessions`);
+
+    res.status(200).json({
+      success: true,
+      total_sessions: sessions.length,
+      sessions: sessions,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error("❌ DEBUG: List QR sessions error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+// ==============================================
 // 🛡️ ERROR HANDLING
 // ==============================================
 app.use((err, req, res, next) => {
