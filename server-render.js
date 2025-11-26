@@ -31,7 +31,7 @@ app.use((req, res, next) => {
 });
 
 // ==============================================
-// 🔥 FIREBASE INITIALIZATION - FIXED VERSION
+// 🔥 FIREBASE INITIALIZATION - SIMPLE & SAFE
 // ==============================================
 let db = null;
 
@@ -40,11 +40,7 @@ try {
     
     const { initializeApp, getApps } = require('firebase/app');
     const { getFirestore } = require('firebase/firestore');
-    const { 
-        collection, doc, getDoc, getDocs, setDoc, updateDoc,
-        query, where, orderBy, limit, Timestamp, deleteDoc
-    } = require('firebase/firestore'); // ✅ إزالة الحرف الزائد
-
+    
     const firebaseConfig = {
         apiKey: process.env.FIREBASE_API_KEY,
         authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -72,9 +68,9 @@ try {
 
 } catch (error) {
     console.error('💥 Firebase initialization failed:', error.message);
-    console.error('🔍 Error details:', error.stack);
     db = null;
 }
+
 // ==============================================
 // 🏥 BASIC ROUTES
 // ==============================================
@@ -1109,67 +1105,6 @@ app.get("/api/debug/qr-sessions", async (req, res) => {
 
   } catch (error) {
     console.error("❌ DEBUG: List QR sessions error:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-// 🔹 تشخيص جلسات QR المحددة
-app.get("/api/debug/qr-session-detail/:sessionId", async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    console.log(`🔍 DEBUG: Detailed check for session: ${sessionId}`);
-    
-    if (!db) {
-      return res.status(503).json({
-        success: false,
-        error: "Firebase not connected"
-      });
-    }
-
-    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
-    
-    if (!sessionDoc.exists()) {
-      // البحث في جميع الجلسات
-      const allSessionsQuery = query(collection(db, "qr_sessions"));
-      const snapshot = await getDocs(allSessionsQuery);
-      
-      const availableSessions = [];
-      snapshot.forEach(doc => {
-        availableSessions.push({
-          id: doc.id,
-          session_id: doc.data().session_id,
-          status: doc.data().status
-        });
-      });
-      
-      return res.status(404).json({
-        success: false,
-        message: "Session not found",
-        requested_session: sessionId,
-        available_sessions: availableSessions,
-        total_sessions: availableSessions.length
-      });
-    }
-
-    const sessionData = sessionDoc.data();
-    
-    res.status(200).json({
-      success: true,
-      session: {
-        ...sessionData,
-        created_at: sessionData.created_at?.toDate?.() || sessionData.created_at,
-        expires_at: sessionData.expires_at?.toDate?.() || sessionData.expires_at,
-        scanned_at: sessionData.scanned_at?.toDate?.() || sessionData.scanned_at,
-        confirmed_at: sessionData.confirmed_at?.toDate?.() || sessionData.confirmed_at
-      },
-      firestore_id: sessionDoc.id,
-      exists: true
-    });
-
-  } catch (error) {
-    console.error("❌ DEBUG: Session detail error:", error);
     res.status(500).json({
       success: false,
       error: error.message
