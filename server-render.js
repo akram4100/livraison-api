@@ -2,6 +2,19 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+// 🔹 تأكد من أن هذه الـ Imports موجودة في أعلى الملف
+const { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc,
+  query, 
+  where, 
+  deleteDoc, 
+  Timestamp 
+} = require('firebase/firestore');
 // Load environment variables
 dotenv.config();
 
@@ -174,10 +187,6 @@ app.get("/api/health", (req, res) => {
 // 👤 USER ROUTES - WITH REAL FIREBASE STORAGE
 // ==============================================
 const bcrypt = require("bcryptjs");
-const { 
-  collection, doc, getDoc, getDocs, setDoc, updateDoc,
-  query, where, deleteDoc, Timestamp 
-} = require('firebase/firestore');
 
 // 🔹 TEST ROUTE - مع Firebase الحقيقي
 app.get("/api/user-test", (req, res) => {
