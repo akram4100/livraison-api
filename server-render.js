@@ -2,21 +2,60 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-
+// 🔹 تأكد من أن هذه الـ Imports موجودة في أعلى الملف
+const { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc,
+  query, 
+  where, 
+  deleteDoc, 
+  Timestamp 
+} = require('firebase/firestore');
 // Load environment variables
 dotenv.config();
 
 const app = express();
 
 // ==============================================
-// 🛡️ CORS CONFIGURATION
+// 🛡️ CORS CONFIGURATION - محسّن لدعم جميع الـ Headers
 // ==============================================
+
+// معالجة طلبات Preflight (OPTIONS) أولاً
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, Cache-Control, Pragma');
+  res.header('Access-Control-Max-Age', '86400');
+  res.status(200).send();
+});
+
+// CORS للطلبات العادية
 app.use(cors({
-    origin: "*",
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  origin: "*",
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Accept',
+    'Origin',
+    'X-Requested-With',
+    'Cache-Control', // 🔥 إضافة هذا
+    'Pragma' // 🔥 وإضافة هذا
+  ]
 }));
+
+// معالجة الـ Headers يدوياً للتأكد
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With, Cache-Control, Pragma');
+  next();
+});
 
 // ==============================================
 // 📦 MIDDLEWARE
@@ -65,6 +104,17 @@ try {
     
     db = getFirestore(firebaseApp);
     console.log('📡 Firebase Firestore connected successfully');
+
+
+} catch (error) {
+    console.error('💥 Firebase initialization failed:', error.message);
+    db = null;
+}
+
+// ==============================================
+// 🧹 QR SESSIONS CLEANUP SYSTEM
+// ==============================================
+
 // نظام تنظيف الجلسات المنتهية تلقائياً
 const startSessionCleanup = () => {
   const cleanupExpiredSessions = async () => {
@@ -109,11 +159,6 @@ const startSessionCleanup = () => {
 // تشغيل النظام بعد اكتمال تهيئة Firebase
 if (db) {
   setTimeout(startSessionCleanup, 3000);
-}
-
-} catch (error) {
-    console.error('💥 Firebase initialization failed:', error.message);
-    db = null;
 }
 
 // ==============================================
@@ -678,7 +723,7 @@ app.post("/api/create-qr-session", async (req, res) => {
   }
 });
 
-// 🔹 الحصول على حالة جلسة QR
+// 🔹 الحصول على حالة جلسة QR - إصدار محسن واحد فقط
 app.get("/api/qr-session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -696,36 +741,57 @@ app.get("/api/qr-session/:sessionId", async (req, res) => {
     if (!sessionDoc.exists()) {
       return res.status(404).json({ 
         success: false,
-        message: "Session not found" 
+        message: "❌ Session not found" 
       });
     }
 
     const sessionData = sessionDoc.data();
 
     // التحقق من انتهاء الصلاحية
-    if (sessionData.expires_at.toDate() < new Date()) {
-      await updateDoc(doc(db, "qr_sessions", sessionId), {
-        status: "expired"
-      });
-      return res.status(400).json({ 
+    const now = new Date();
+    const expiresAt = sessionData.expires_at.toDate();
+    
+    if (expiresAt < now) {
+      // تحديث الحالة إذا انتهت الصلاحية
+      if (sessionData.status !== 'expired') {
+        await updateDoc(doc(db, "qr_sessions", sessionId), {
+          status: "expired"
+        });
+        sessionData.status = "expired";
+      }
+      
+      return res.status(200).json({
         success: false,
-        message: "Session expired" 
+        message: "❌ Session expired",
+        session: {
+          ...sessionData,
+          expires_at: expiresAt,
+          is_expired: true
+        }
       });
     }
 
-    console.log(`✅ Session status: ${sessionData.status}`);
+    // حساب الوقت المتبقي
+    const timeRemaining = Math.floor((expiresAt - now) / 1000);
+
+    console.log(`✅ Session status: ${sessionData.status}, Time remaining: ${timeRemaining}s`);
 
     res.status(200).json({
       success: true,
-      session: sessionData
+      session: {
+        ...sessionData,
+        expires_at: expiresAt,
+        time_remaining: timeRemaining,
+        is_expired: false
+      }
     });
 
   } catch (error) {
     console.error("❌ Get QR session error:", error);
     res.status(500).json({ 
       success: false,
-      message: "Error getting session",
-      error: error.message 
+      message: "❌ Error getting session information",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -1039,6 +1105,143 @@ app.post("/api/generate-dashboard-qr", async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: "Internal server error" 
+    });
+  }
+});
+// ==============================================
+// 🔄 SIMPLE QR ENDPOINTS (بدون مشاكل CORS)
+// ==============================================
+
+// 🔹 endpoint QR مبسط بدون مشاكل CORS
+app.post("/api/simple-create-qr", async (req, res) => {
+  try {
+    console.log("🎯 Simple QR creation request...");
+    
+    if (!db) {
+      return res.status(503).json({ 
+        success: false,
+        message: "❌ Service unavailable" 
+      });
+    }
+
+    const sessionId = 'qr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    const sessionData = {
+      id: sessionId,
+      session_id: sessionId,
+      type: "login",
+      status: "waiting",
+      created_at: Timestamp.now(),
+      expires_at: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)),
+      user_data: null,
+      mobile_device: null,
+      scanned_at: null,
+      confirmed_at: null
+    };
+
+    await setDoc(doc(db, "qr_sessions", sessionId), sessionData);
+
+    // إنشاء بيانات QR مبسطة
+    const qrData = {
+      type: 'livraison_qr',
+      session_id: sessionId,
+      action: 'login',
+      timestamp: Date.now(),
+      app_name: 'Livraison Express',
+      base_url: "https://livraison-api-x45n.onrender.com"
+    };
+
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}&format=png&margin=10`;
+
+    console.log(`✅ Simple QR session created: ${sessionId}`);
+
+    res.status(200).json({
+      success: true,
+      session_id: sessionId,
+      qr_url: qrUrl,
+      qr_data: qrData,
+      expires_at: sessionData.expires_at.toDate(),
+      message: "QR session created successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ Simple QR creation error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error creating QR session",
+      error: error.message 
+    });
+  }
+});
+
+// 🔹 endpoint بديل لفحص حالة الجلسة
+app.get("/api/simple-qr-session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log(`🔍 Simple checking QR session: ${sessionId}`);
+    
+    if (!db) {
+      return res.status(503).json({ 
+        success: false,
+        message: "❌ Service unavailable" 
+      });
+    }
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        success: false,
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    const now = new Date();
+    const expiresAt = sessionData.expires_at.toDate();
+    
+    if (expiresAt < now) {
+      // تحديث الحالة إذا انتهت الصلاحية
+      if (sessionData.status !== 'expired') {
+        await updateDoc(doc(db, "qr_sessions", sessionId), {
+          status: "expired"
+        });
+        sessionData.status = "expired";
+      }
+      
+      return res.status(200).json({
+        success: false,
+        message: "❌ Session expired",
+        session: {
+          ...sessionData,
+          expires_at: expiresAt,
+          is_expired: true
+        }
+      });
+    }
+
+    // حساب الوقت المتبقي
+    const timeRemaining = Math.floor((expiresAt - now) / 1000);
+
+    console.log(`✅ Simple session status: ${sessionData.status}, Time remaining: ${timeRemaining}s`);
+
+    res.status(200).json({
+      success: true,
+      session: {
+        ...sessionData,
+        expires_at: expiresAt,
+        time_remaining: timeRemaining,
+        is_expired: false
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Simple get QR session error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "❌ Error getting session information"
     });
   }
 });
