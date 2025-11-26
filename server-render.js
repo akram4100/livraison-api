@@ -1114,6 +1114,67 @@ app.get("/api/debug/qr-sessions", async (req, res) => {
     });
   }
 });
+// 🔹 تشخيص جلسات QR المحددة
+app.get("/api/debug/qr-session-detail/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log(`🔍 DEBUG: Detailed check for session: ${sessionId}`);
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        error: "Firebase not connected"
+      });
+    }
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
+    
+    if (!sessionDoc.exists()) {
+      // البحث في جميع الجلسات
+      const allSessionsQuery = query(collection(db, "qr_sessions"));
+      const snapshot = await getDocs(allSessionsQuery);
+      
+      const availableSessions = [];
+      snapshot.forEach(doc => {
+        availableSessions.push({
+          id: doc.id,
+          session_id: doc.data().session_id,
+          status: doc.data().status
+        });
+      });
+      
+      return res.status(404).json({
+        success: false,
+        message: "Session not found",
+        requested_session: sessionId,
+        available_sessions: availableSessions,
+        total_sessions: availableSessions.length
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+    
+    res.status(200).json({
+      success: true,
+      session: {
+        ...sessionData,
+        created_at: sessionData.created_at?.toDate?.() || sessionData.created_at,
+        expires_at: sessionData.expires_at?.toDate?.() || sessionData.expires_at,
+        scanned_at: sessionData.scanned_at?.toDate?.() || sessionData.scanned_at,
+        confirmed_at: sessionData.confirmed_at?.toDate?.() || sessionData.confirmed_at
+      },
+      firestore_id: sessionDoc.id,
+      exists: true
+    });
+
+  } catch (error) {
+    console.error("❌ DEBUG: Session detail error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 // ==============================================
 // 📱 MOBILE QR SCANNING ROUTES
 // ==============================================
