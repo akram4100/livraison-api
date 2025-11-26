@@ -40,7 +40,10 @@ try {
     
     const { initializeApp, getApps } = require('firebase/app');
     const { getFirestore } = require('firebase/firestore');
-    
+    const { 
+  collection, doc, getDoc, getDocs, setDoc, updateDoc,
+  query, where, orderBy, limit, Timestamp 
+} = require('firebase/firestore');f
     const firebaseConfig = {
         apiKey: process.env.FIREBASE_API_KEY,
         authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -1108,6 +1111,254 @@ app.get("/api/debug/qr-sessions", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+// ==============================================
+// 📱 MOBILE QR SCANNING ROUTES
+// ==============================================
+
+// 🔹 CREATE QR SESSION - لإنشاء جلسة QR
+app.post("/api/mobile/create-qr-session", async (req, res) => {
+  try {
+    console.log("📱 Creating QR session:", req.body);
+    const { user_id, user_data, session_type = "login" } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required"
+      });
+    }
+
+    const session_id = `qr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const expiration = Timestamp.fromDate(new Date(Date.now() + 5 * 60 * 1000)); // 5 دقائق
+
+    // حفظ الجلسة في Firebase
+    await setDoc(doc(db, "qr_sessions", session_id), {
+      session_id,
+      user_id,
+      user_data,
+      session_type,
+      status: "pending", // pending, confirmed, expired
+      created_at: Timestamp.now(),
+      expires_at: expiration,
+      scanned_at: null,
+      confirmed_at: null
+    });
+
+    console.log(`✅ QR session created: ${session_id}`);
+
+    res.status(200).json({
+      success: true,
+      session_id,
+      qr_data: {
+        type: "livraison_qr",
+        session_id,
+        action: session_type,
+        timestamp: Date.now(),
+        app_name: "Livraison Express",
+        base_url: "https://livraison-api-x45n.onrender.com"
+      },
+      message: "QR session created successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ QR session creation error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create QR session"
+    });
+  }
+});
+
+// 🔹 SCAN QR CODE - للمسح التلقائي
+app.post("/api/mobile/scan-qr", async (req, res) => {
+  try {
+    console.log("📱 QR scan request:", req.body);
+    const { session_id, device_info } = req.body;
+
+    if (!session_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Session ID is required"
+      });
+    }
+
+    // البحث عن الجلسة في Firebase
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "QR session not found or expired"
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "expired"
+      });
+      
+      return res.status(400).json({
+        success: false,
+        message: "QR session has expired"
+      });
+    }
+
+    // تحديث الجلسة كممسوحة
+    await updateDoc(doc(db, "qr_sessions", session_id), {
+      status: "scanned",
+      scanned_at: Timestamp.now(),
+      device_info: device_info || {}
+    });
+
+    console.log(`✅ QR scanned successfully: ${session_id}`);
+
+    res.status(200).json({
+      success: true,
+      session_id,
+      session_type: sessionData.session_type,
+      user_data: sessionData.user_data,
+      message: "QR code scanned successfully",
+      next_step: "waiting_confirmation"
+    });
+
+  } catch (error) {
+    console.error("❌ QR scan error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to process QR scan"
+    });
+  }
+});
+
+// 🔹 CONFIRM QR LOGIN - لتأكيد تسجيل الدخول
+app.post("/api/mobile/confirm-qr-login", async (req, res) => {
+  try {
+    console.log("📱 QR login confirmation:", req.body);
+    const { session_id } = req.body;
+
+    if (!session_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Session ID is required"
+      });
+    }
+
+    // البحث عن الجلسة
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "QR session not found"
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "expired"
+      });
+      
+      return res.status(400).json({
+        success: false,
+        message: "QR session has expired"
+      });
+    }
+
+    // تأكيد الجلسة
+    await updateDoc(doc(db, "qr_sessions", session_id), {
+      status: "confirmed",
+      confirmed_at: Timestamp.now()
+    });
+
+    console.log(`✅ QR login confirmed: ${session_id}`);
+
+    res.status(200).json({
+      success: true,
+      session_id,
+      user_data: sessionData.user_data,
+      message: "QR login confirmed successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ QR confirmation error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to confirm QR login"
+    });
+  }
+});
+
+// 🔹 CHECK QR SESSION STATUS - للتحقق من حالة الجلسة
+app.get("/api/qr-session/:session_id", async (req, res) => {
+  try {
+    const { session_id } = req.params;
+    console.log("📱 Checking QR session status:", session_id);
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "QR session not found"
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    res.status(200).json({
+      success: true,
+      session: sessionData,
+      message: "Session status retrieved successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ QR session check error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to check session status"
+    });
+  }
+});
+
+// 🔹 GET USER QR SESSIONS - لجلسات المستخدم
+app.get("/api/user/:user_id/qr-sessions", async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    console.log("📱 Getting user QR sessions:", user_id);
+
+    const sessionsQuery = query(
+      collection(db, "qr_sessions"),
+      where("user_id", "==", user_id),
+      orderBy("created_at", "desc"),
+      limit(10)
+    );
+
+    const sessionsSnapshot = await getDocs(sessionsQuery);
+    const sessions = sessionsSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    res.status(200).json({
+      success: true,
+      sessions,
+      message: "User sessions retrieved successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ User sessions error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get user sessions"
     });
   }
 });
