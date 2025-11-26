@@ -65,6 +65,51 @@ try {
     
     db = getFirestore(firebaseApp);
     console.log('📡 Firebase Firestore connected successfully');
+// نظام تنظيف الجلسات المنتهية تلقائياً
+const startSessionCleanup = () => {
+  const cleanupExpiredSessions = async () => {
+    try {
+      if (!db) {
+        console.log('❌ Firebase not connected, skipping cleanup');
+        return;
+      }
+
+      const now = Timestamp.now();
+      const qrSessionsQuery = query(
+        collection(db, "qr_sessions"),
+        where("expires_at", "<", now)
+      );
+      
+      const snapshot = await getDocs(qrSessionsQuery);
+      const deletePromises = [];
+      
+      snapshot.forEach((doc) => {
+        // حذف الجلسات المنتهية فقط إذا لم تكن مؤكدة
+        const sessionData = doc.data();
+        if (sessionData.status !== 'confirmed') {
+          deletePromises.push(deleteDoc(doc.ref));
+        }
+      });
+      
+      await Promise.all(deletePromises);
+      if (deletePromises.length > 0) {
+        console.log(`🧹 Cleaned up ${deletePromises.length} expired QR sessions`);
+      }
+    } catch (error) {
+      console.error('❌ Session cleanup error:', error.message);
+    }
+  };
+
+  // تشغيل التنظيف فوراً ثم كل 5 دقائق
+  cleanupExpiredSessions();
+  setInterval(cleanupExpiredSessions, 5 * 60 * 1000);
+  console.log('✅ Session cleanup system started');
+};
+
+// تشغيل النظام بعد اكتمال تهيئة Firebase
+if (db) {
+  setTimeout(startSessionCleanup, 3000);
+}
 
 } catch (error) {
     console.error('💥 Firebase initialization failed:', error.message);
@@ -685,11 +730,18 @@ app.get("/api/qr-session/:sessionId", async (req, res) => {
   }
 });
 
-// 🔹 الهاتف: مسح QR
+// 🔹 استبدال endpoint المسح الحالي بهذا الإصدار المحسن
 app.post("/api/mobile/scan-qr", async (req, res) => {
   try {
     const { session_id, device_info = {} } = req.body;
     console.log(`📱 Mobile scanning QR: ${session_id}`);
+
+    if (!session_id) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Session ID is required" 
+      });
+    }
 
     if (!db) {
       return res.status(503).json({ 
@@ -703,44 +755,71 @@ app.post("/api/mobile/scan-qr", async (req, res) => {
     if (!sessionDoc.exists()) {
       return res.status(404).json({ 
         success: false,
-        message: "Session not found" 
+        message: "❌ QR session not found" 
       });
     }
 
     const sessionData = sessionDoc.data();
 
+    // التحقق من انتهاء الصلاحية
     if (sessionData.expires_at.toDate() < new Date()) {
       await updateDoc(doc(db, "qr_sessions", session_id), {
         status: "expired"
       });
       return res.status(400).json({ 
         success: false,
-        message: "Session expired" 
+        message: "❌ QR session has expired" 
       });
     }
 
-    // تحديث حالة الجلسة
+    // التحقق من حالة الجلسة
+    if (sessionData.status === "confirmed") {
+      return res.status(400).json({ 
+        success: false,
+        message: "❌ This QR has already been used" 
+      });
+    }
+
+    if (sessionData.status === "scanned") {
+      return res.status(400).json({ 
+        success: false,
+        message: "❌ QR is already being processed" 
+      });
+    }
+
+    // تحديث حالة الجلسة إلى "تم المسح"
     await updateDoc(doc(db, "qr_sessions", session_id), {
       status: "scanned",
-      mobile_device: device_info,
-      scanned_at: Timestamp.now()
+      mobile_device: {
+        ...device_info,
+        scan_timestamp: new Date().toISOString()
+      },
+      scanned_at: Timestamp.now(),
+      last_updated: Timestamp.now()
     });
 
-    console.log(`✅ QR scanned by mobile: ${session_id}`);
+    console.log(`✅ QR scanned successfully: ${session_id}`);
+    
+    // حساب الوقت المتبقي
+    const expiresAt = sessionData.expires_at.toDate();
+    const timeRemaining = Math.max(0, Math.floor((expiresAt - new Date()) / 1000));
 
     res.status(200).json({
       success: true,
-      message: "QR scanned successfully",
+      message: "✅ QR scanned successfully",
       session_type: sessionData.type,
-      session_id: session_id
+      session_id: session_id,
+      status: "scanned",
+      expires_in: timeRemaining,
+      next_step: "waiting_confirmation"
     });
 
   } catch (error) {
     console.error("❌ Mobile scan error:", error);
     res.status(500).json({ 
       success: false,
-      message: "Error scanning QR",
-      error: error.message 
+      message: "❌ Internal server error during scanning",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -836,10 +915,11 @@ app.post("/api/mobile/confirm-login", async (req, res) => {
   }
 });
 
-// 🔹 حذف جلسة QR (للتنظيف)
-app.delete("/api/qr-session/:sessionId", async (req, res) => {
+// 🔹 تحسين endpoint التحقق من حالة الجلسة
+app.get("/api/qr-session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
+    console.log(`🔍 Checking QR session: ${sessionId}`);
     
     if (!db) {
       return res.status(503).json({ 
@@ -848,21 +928,62 @@ app.delete("/api/qr-session/:sessionId", async (req, res) => {
       });
     }
 
-    await deleteDoc(doc(db, "qr_sessions", sessionId));
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
     
-    console.log(`✅ QR session deleted: ${sessionId}`);
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        success: false,
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    const now = new Date();
+    const expiresAt = sessionData.expires_at.toDate();
     
+    if (expiresAt < now) {
+      // تحديث الحالة إذا انتهت الصلاحية
+      if (sessionData.status !== 'expired') {
+        await updateDoc(doc(db, "qr_sessions", sessionId), {
+          status: "expired"
+        });
+        sessionData.status = "expired";
+      }
+      
+      return res.status(200).json({
+        success: false,
+        message: "❌ Session expired",
+        session: {
+          ...sessionData,
+          expires_at: expiresAt,
+          is_expired: true
+        }
+      });
+    }
+
+    // حساب الوقت المتبقي
+    const timeRemaining = Math.floor((expiresAt - now) / 1000);
+
+    console.log(`✅ Session status: ${sessionData.status}, Time remaining: ${timeRemaining}s`);
+
     res.status(200).json({
       success: true,
-      message: "Session deleted successfully"
+      session: {
+        ...sessionData,
+        expires_at: expiresAt,
+        time_remaining: timeRemaining,
+        is_expired: false
+      }
     });
 
   } catch (error) {
-    console.error("❌ Delete QR session error:", error);
+    console.error("❌ Get QR session error:", error);
     res.status(500).json({ 
       success: false,
-      message: "Error deleting session",
-      error: error.message 
+      message: "❌ Error getting session information",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
