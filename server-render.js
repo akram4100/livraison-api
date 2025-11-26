@@ -2,19 +2,6 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-// 🔹 تأكد من أن هذه الـ Imports موجودة في أعلى الملف
-const { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc,
-  query, 
-  where, 
-  deleteDoc, 
-  Timestamp 
-} = require('firebase/firestore');
 // Load environment variables
 dotenv.config();
 
