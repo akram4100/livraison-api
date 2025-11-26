@@ -31,7 +31,7 @@ app.use((req, res, next) => {
 });
 
 // ==============================================
-// 🔥 FIREBASE INITIALIZATION - SIMPLE & SAFE
+// 🔥 FIREBASE INITIALIZATION - FIXED VERSION
 // ==============================================
 let db = null;
 
@@ -41,9 +41,10 @@ try {
     const { initializeApp, getApps } = require('firebase/app');
     const { getFirestore } = require('firebase/firestore');
     const { 
-  collection, doc, getDoc, getDocs, setDoc, updateDoc,
-  query, where, orderBy, limit, Timestamp 
-} = require('firebase/firestore');f
+        collection, doc, getDoc, getDocs, setDoc, updateDoc,
+        query, where, orderBy, limit, Timestamp, deleteDoc
+    } = require('firebase/firestore'); // ✅ إزالة الحرف الزائد
+
     const firebaseConfig = {
         apiKey: process.env.FIREBASE_API_KEY,
         authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -71,9 +72,9 @@ try {
 
 } catch (error) {
     console.error('💥 Firebase initialization failed:', error.message);
+    console.error('🔍 Error details:', error.stack);
     db = null;
 }
-
 // ==============================================
 // 🏥 BASIC ROUTES
 // ==============================================
