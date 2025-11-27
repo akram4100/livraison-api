@@ -1202,6 +1202,67 @@ app.get("/api/qr-session/:sessionId", async (req, res) => {
     });
   }
 });
+// 🔹 تأكيد الدخول بدون كلمة مرور (للمسح التلقائي)
+app.post("/api/confirm-qr-login", async (req, res) => {
+  try {
+    const { session_id, user_data } = req.body;
+    console.log(`📱 Mobile confirming QR login: ${session_id}`, user_data);
+
+    if (!session_id || !user_data) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Session ID and user data are required" 
+      });
+    }
+
+    const sessionRef = doc(db, "qr_sessions", session_id);
+    const sessionDoc = await getDoc(sessionRef);
+
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Session not found" 
+      });
+    }
+
+    const session = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    if (session.expires_at.toDate() < new Date()) {
+      await updateDoc(sessionRef, { status: "expired" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Session expired" 
+      });
+    }
+
+    // تحديث الجلسة بتأكيد الدخول
+    await updateDoc(sessionRef, {
+      status: "confirmed",
+      user_data: user_data,
+      confirmed_at: Timestamp.now(),
+      mobile_device: {
+        confirm_time: new Date().toISOString(),
+        user_agent: req.headers['user-agent']
+      }
+    });
+
+    console.log(`✅ QR login confirmed: ${session_id}`);
+
+    res.json({ 
+      success: true, 
+      message: "Login confirmed successfully",
+      user: user_data
+    });
+
+  } catch (err) {
+    console.error("❌ Confirm QR login error:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
 // ==============================================
 // 🔐 DASHBOARD QR ENDPOINTS 
 // ==============================================
