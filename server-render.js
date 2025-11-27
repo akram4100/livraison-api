@@ -1385,7 +1385,300 @@ app.post("/api/debug/create-qr-session", async (req, res) => {
     });
   }
 });
+// 🔹 إنشاء جلسة QR للهاتف (الهاتف يولد الكود)
+app.post("/api/mobile/generate-login-qr", async (req, res) => {
+  try {
+    const { user_email, user_name } = req.body;
+    console.log("📱 Mobile generating login QR for:", user_email);
 
+    if (!db) {
+      return res.status(503).json({ 
+        success: false,
+        message: "❌ Service unavailable" 
+      });
+    }
+
+    const sessionId = 'mobile_qr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    const sessionData = {
+      id: sessionId,
+      session_id: sessionId,
+      type: "mobile_to_web_login",
+      status: "waiting",
+      created_at: Timestamp.now(),
+      expires_at: Timestamp.fromDate(new Date(Date.now() + 5 * 60 * 1000)), // 5 دقائق
+      mobile_user: {
+        email: user_email,
+        name: user_name
+      },
+      web_user: null,
+      scanned_at: null,
+      confirmed_at: null,
+      login_confirmed: false
+    };
+
+    await setDoc(doc(db, "qr_sessions", sessionId), sessionData);
+
+    // إنشاء بيانات QR للهاتف
+    const qrData = {
+      type: 'mobile_login_qr',
+      session_id: sessionId,
+      action: 'login_to_web',
+      timestamp: Date.now(),
+      app_name: 'Livraison Express',
+      base_url: "https://livraison-api-x45n.onrender.com"
+    };
+
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}&format=png&margin=10`;
+
+    console.log(`✅ Mobile QR session created: ${sessionId}`);
+
+    res.status(200).json({
+      success: true,
+      session_id: sessionId,
+      qr_url: qrUrl,
+      qr_data: qrData,
+      expires_at: sessionData.expires_at.toDate(),
+      message: "Mobile login QR generated successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ Mobile QR generation error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error generating mobile QR",
+      error: error.message 
+    });
+  }
+});
+
+// 🔹 الداشبورد يمسح الكود من الهاتف
+app.post("/api/web/scan-mobile-qr", async (req, res) => {
+  try {
+    const { session_id, web_user_email } = req.body;
+    console.log(`🖥️ Web scanning mobile QR: ${session_id} for user: ${web_user_email}`);
+
+    if (!session_id || !web_user_email) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Session ID and user email are required" 
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ 
+        success: false,
+        message: "❌ Service unavailable" 
+      });
+    }
+
+    // التحقق من الجلسة
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        success: false,
+        message: "❌ QR session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "expired"
+      });
+      return res.status(400).json({ 
+        success: false,
+        message: "❌ QR session has expired" 
+      });
+    }
+
+    // التحقق من أن الجلسة مخصصة للهاتف
+    if (sessionData.type !== "mobile_to_web_login") {
+      return res.status(400).json({ 
+        success: false,
+        message: "❌ Invalid QR type" 
+      });
+    }
+
+    // تحديث الجلسة بأن الداشبورد مسح الكود
+    await updateDoc(doc(db, "qr_sessions", session_id), {
+      status: "scanned",
+      web_user: {
+        email: web_user_email,
+        scan_timestamp: new Date().toISOString()
+      },
+      scanned_at: Timestamp.now(),
+      last_updated: Timestamp.now()
+    });
+
+    console.log(`✅ Mobile QR scanned by web: ${session_id}`);
+
+    res.status(200).json({
+      success: true,
+      message: "✅ QR scanned successfully",
+      session_id: session_id,
+      mobile_user: sessionData.mobile_user,
+      status: "scanned",
+      next_step: "waiting_mobile_confirmation"
+    });
+
+  } catch (error) {
+    console.error("❌ Web scan mobile QR error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "❌ Internal server error during scanning"
+    });
+  }
+});
+
+// 🔹 الهاتف يؤكد الدخول
+app.post("/api/mobile/confirm-web-login", async (req, res) => {
+  try {
+    const { session_id, confirm } = req.body;
+    console.log(`📱 Mobile confirming web login: ${session_id}, confirm: ${confirm}`);
+
+    if (!session_id) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Session ID is required" 
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({ 
+        success: false,
+        message: "❌ Service unavailable" 
+      });
+    }
+
+    // التحقق من الجلسة
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", session_id));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        success: false,
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    if (sessionData.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "expired"
+      });
+      return res.status(400).json({ 
+        success: false,
+        message: "Session expired" 
+      });
+    }
+
+    if (sessionData.status !== "scanned") {
+      return res.status(400).json({ 
+        success: false,
+        message: "QR not scanned yet" 
+      });
+    }
+
+    if (confirm) {
+      // تأكيد الدخول الناجح
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "confirmed",
+        login_confirmed: true,
+        confirmed_at: Timestamp.now()
+      });
+
+      console.log(`✅ Mobile confirmed web login: ${session_id}`);
+
+      res.status(200).json({
+        success: true,
+        message: "Login confirmed successfully",
+        session_id: session_id,
+        status: "confirmed"
+      });
+    } else {
+      // رفض الدخول
+      await updateDoc(doc(db, "qr_sessions", session_id), {
+        status: "rejected",
+        login_confirmed: false,
+        confirmed_at: Timestamp.now()
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Login rejected",
+        session_id: session_id,
+        status: "rejected"
+      });
+    }
+
+  } catch (error) {
+    console.error("❌ Mobile confirm web login error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error confirming login",
+      error: error.message 
+    });
+  }
+});
+
+// 🔹 فحص حالة الجلسة (للداشبورد)
+app.get("/api/session-status/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log(`🔍 Checking session status: ${sessionId}`);
+
+    if (!db) {
+      return res.status(503).json({ 
+        success: false,
+        message: "❌ Service unavailable" 
+      });
+    }
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
+    
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ 
+        success: false,
+        message: "❌ Session not found" 
+      });
+    }
+
+    const sessionData = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    const now = new Date();
+    const expiresAt = sessionData.expires_at.toDate();
+    const isExpired = expiresAt < now;
+
+    if (isExpired && sessionData.status !== 'expired') {
+      await updateDoc(doc(db, "qr_sessions", sessionId), {
+        status: "expired"
+      });
+      sessionData.status = "expired";
+    }
+
+    res.status(200).json({
+      success: true,
+      session: {
+        ...sessionData,
+        expires_at: expiresAt,
+        is_expired: isExpired,
+        time_remaining: isExpired ? 0 : Math.floor((expiresAt - now) / 1000)
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Get session status error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "❌ Error getting session status"
+    });
+  }
+});
 // 🔹 سجل جميع جلسات QR (للتشخيص)
 app.get("/api/debug/qr-sessions", async (req, res) => {
   try {
