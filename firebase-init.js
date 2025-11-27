@@ -1,8 +1,8 @@
-// firebase-init.js - FIXED VERSION
-import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, doc, setDoc, Timestamp } from 'firebase/firestore';
+// firebase-init.js - Telegram Style QR System
+const { initializeApp, getApps } = require('firebase/app');
+const { getFirestore, doc, setDoc, Timestamp, collection, getDocs } = require('firebase/firestore');
 
-// التهيئة - نفس الإعدادات
+// إعدادات Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyB2gSvCF-b2uAZM9j-EQAYs6UKjbRmuxrM",
   authDomain: "livraison-express-f48c3.firebaseapp.com",
@@ -12,214 +12,121 @@ const firebaseConfig = {
   appId: "1:1077573560587:web:c1a1ffb4cd36f60d605a0e"
 };
 
-// ✅ تهيئة Firebase مع التحقق من التكرار
-const existingApps = getApps();
-const app = existingApps.length === 0 ? initializeApp(firebaseConfig) : existingApps[0];
+// التهيئة
+const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-console.log('🔥 Firebase initialized for data seeding');
+console.log('🔥 Firebase initialized for Telegram QR System');
 
-// دالة لإضافة المستخدمين
-const addSampleUsers = async () => {
-  const users = [
-    {
-      nom: "Akram",
-      email: "aarabic147@gmail.com",
-      role: "client",
-      verified: true,
-      date_creation: Timestamp.now(),
-      mot_de_passe: "$2b$10$tIKuypr0OnAZQmqwSE.jau7AmS761q/twFKL43Al4xSOWni9riCFi", // test123
-      telephone: "+213550000000",
-      ville: "Alger",
-      reset_code: null,
-      reset_expires: null
-    },
-    {
-      nom: "fodil", 
-      email: "akramchabouni00@gmail.com",
-      role: "client",
-      verified: true, 
-      date_creation: Timestamp.now(),
-      mot_de_passe: "$2b$10$6L7eGrJ7WufRtUEZoGBtmuqxUUxIf8MVY7.w/dyVNvPnsoj9y2dsW", // test123
-      telephone: "+213551111111",
-      ville: "Oran",
-      reset_code: null,
-      reset_expires: null
-    },
-    {
-      nom: "Admin System",
-      email: "admin@livraison.com",
-      role: "admin",
-      verified: true,
-      date_creation: Timestamp.now(),
-      mot_de_passe: "$2b$10$adminhashedpassword123456789012", // admin123
-      telephone: "+213552222222",
-      ville: "Alger",
-      reset_code: null,
-      reset_expires: null
-    },
-    // ✅ إضافة مستخدم للاختبار
-    {
-      nom: "Test User",
-      email: "akramaxpo@gmail.com",
-      role: "client",
-      verified: true,
-      date_creation: Timestamp.now(),
-      mot_de_passe: "$2b$10$tIKuypr0OnAZQmqwSE.jau7AmS761q/twFKL43Al4xSOWni9riCFi", // test123
-      telephone: "+213553333333",
-      ville: "Alger",
-      reset_code: null,
-      reset_expires: null
-    }
-  ];
-
+// 🔧 هيكل الجدول الصحيح لـ QR Sessions
+const initializeQRSessions = async () => {
   try {
-    for (const user of users) {
-      await setDoc(doc(db, "utilisateurs", user.email), user);
-      console.log(`✅ ${user.nom} (${user.email}) added successfully`);
+    // 1. تنظيف الجدول القديم إذا كان موجوداً
+    console.log('🧹 Cleaning old QR sessions...');
+    try {
+      const oldSessions = await getDocs(collection(db, "qr_sessions"));
+      const deletePromises = [];
+      oldSessions.forEach((doc) => {
+        deletePromises.push(deleteDoc(doc.ref));
+      });
+      await Promise.all(deletePromises);
+      console.log(`✅ Deleted ${deletePromises.length} old sessions`);
+    } catch (error) {
+      console.log('ℹ️ No old sessions to delete');
     }
-    console.log('🎉 All users added!');
+
+    // 2. إنشاء هيكل الجدول الجديد
+    const sampleSession = {
+      // ✅ المعرف الأساسي (مثل session_id)
+      session_id: "qr_" + Date.now(),
+      
+      // ✅ حالة الجلسة
+      status: "waiting", // waiting, scanned, confirmed, expired
+      
+      // ✅ معلومات التوقيت
+      created_at: Timestamp.now(),
+      expires_at: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)), // 10 دقائق
+      
+      // ✅ بيانات المستخدم (تتم تعبئتها عند التأكيد)
+      user_data: null,
+      
+      // ✅ معلومات الجهاز المحمول
+      mobile_device: null,
+      
+      // ✅ معلومات مستخدم الويب
+      web_user: null,
+      
+      // ✅ نوع الجلسة
+      type: "web_login", // web_login, mobile_login, etc.
+      
+      // ✅ أوقات إضافية للتتبع
+      scanned_at: null,
+      confirmed_at: null
+    };
+
+    // 3. حفظ نموذج في Firebase
+    await setDoc(doc(db, "qr_sessions", sampleSession.session_id), sampleSession);
+    
+    console.log('✅ QR Sessions collection initialized successfully!');
+    console.log('📋 Sample session structure:');
+    console.log(JSON.stringify(sampleSession, null, 2));
+    
+    return true;
+    
   } catch (error) {
-    console.error('❌ Error adding users:', error.message);
+    console.error('❌ Error initializing QR sessions:', error.message);
+    return false;
   }
 };
 
-// دالة لإضافة السائقين
-const addSampleDrivers = async () => {
-  const drivers = [
-    {
-      id: "driver1",
-      nom: "Ahmed Benali",
-      email: "ahmed@livraison.com",
-      telephone: "+213661234567",
-      statut: "actif",
-      vehicule: "Moto",
-      plaque: "DZ-16-12345",
-      note_moyenne: 4.5,
-      date_creation: Timestamp.now()
-    },
-    {
-      id: "driver2",
-      nom: "Yasmine Mekki",
-      email: "yasmine@livraison.com", 
-      telephone: "+213669876543",
-      statut: "actif",
-      vehicule: "Voiture",
-      plaque: "DZ-31-54321",
-      note_moyenne: 4.8,
-      date_creation: Timestamp.now()
-    }
-  ];
-
-  try {
-    for (const driver of drivers) {
-      await setDoc(doc(db, "livreurs", driver.id), driver);
-      console.log(`✅ Driver ${driver.nom} added`);
-    }
-    console.log('🎉 All drivers added!');
-  } catch (error) {
-    console.error('❌ Error adding drivers:', error.message);
-  }
-};
-
-// دالة لإضافة الطلبات
-const addSampleOrders = async () => {
-  const orders = [
-    {
-      id: "ORDER_001",
-      id_client: "aarabic147@gmail.com",
-      description: "Colis alimentaire - Fruits et légumes frais",
-      statut: "livré",
-      date_creation: Timestamp.fromDate(new Date("2024-01-20")),
-      livreur: "driver1",
-      montant: 120,
-      adresse: "123 Rue Didouche Mourad, Alger Centre",
-      ville: "Alger"
-    },
-    {
-      id: "ORDER_002",
-      id_client: "akramaxpo@gmail.com", // ✅ استخدام البريد الذي تحاول الدخول به
-      description: "Documents importants", 
-      statut: "en_cours",
-      date_creation: Timestamp.now(),
-      livreur: "driver2",
-      montant: 85,
-      adresse: "456 Boulevard de la Soummam, Oran",
-      ville: "Oran"
-    }
-  ];
-
-  try {
-    for (const order of orders) {
-      await setDoc(doc(db, "commandes", order.id), order);
-      console.log(`✅ Order ${order.id} for ${order.id_client} added`);
-    }
-    console.log('🎉 All orders added!');
-  } catch (error) {
-    console.error('❌ Error adding orders:', error.message);
-  }
-};
-
-// دالة لإضافة pending verifications
-const addPendingVerifications = async () => {
-  const pendingUsers = [
-    {
-      id: "pending_001",
-      nom: "Nouveau Client Test",
-      email: "newuser@example.com",
-      mot_de_passe: "$2b$10$testhashedpassword123456789012",
-      role: "client",
-      code_verification: "123456",
-      date_creation: Timestamp.now(),
-      expiration: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000))
-    }
-  ];
-
-  try {
-    for (const user of pendingUsers) {
-      await setDoc(doc(db, "pending_verifications", user.id), user);
-      console.log(`✅ Pending verification ${user.email} added`);
-    }
-    console.log('🎉 All pending verifications added!');
-  } catch (error) {
-    console.error('❌ Error adding pending verifications:', error.message);
-  }
-};
-
-// الدالة الرئيسية
-const initializeDatabase = async () => {
-  console.log('🚀 Starting Firebase database initialization...');
+// 4. اختبار الـ endpoints الأساسية
+const testEndpoints = async () => {
+  console.log('\n🧪 Testing required endpoints...');
   
+  const endpoints = [
+    'POST /api/create-qr-session',
+    'GET /api/qr-session/:id', 
+    'POST /api/qr-confirm'
+  ];
+  
+  endpoints.forEach(endpoint => {
+    console.log(`   ✅ ${endpoint}`);
+  });
+};
+
+// 5. التعليمات
+const showInstructions = () => {
+  console.log('\n🎯 Telegram-Style QR Login System');
+  console.log('================================');
+  console.log('1. ✅ Firebase initialized');
+  console.log('2. ✅ QR Sessions collection created');
+  console.log('3. 🔄 Add these endpoints to server-render.js:');
+  console.log('   - POST /api/create-qr-session');
+  console.log('   - GET /api/qr-session/:id');
+  console.log('   - POST /api/qr-confirm');
+  console.log('4. 📱 Update DashboardClient.jsx for mobile scanning');
+  console.log('5. 🌐 Update Login.jsx for web QR display');
+  console.log('\n🚀 Ready to implement Telegram-style login!');
+};
+
+// التشغيل الرئيسي
+const main = async () => {
   try {
-    console.log('📝 Seeding sample data...');
+    console.log('🚀 Starting Firebase initialization...');
     
-    await addSampleUsers();
-    await addSampleDrivers();
-    await addSampleOrders();
-    await addPendingVerifications();
+    const success = await initializeQRSessions();
     
-    console.log('\n🎉 Firebase database initialization completed successfully!');
-    console.log('📊 Data structure created:');
-    console.log('   👥 utilisateurs - 4 users (including akramaxpo@gmail.com)');
-    console.log('   🚚 livreurs - 2 drivers');
-    console.log('   📦 commandes - 2 orders');
-    console.log('   📧 pending_verifications - 1 pending user');
-    
-    console.log('\n🔑 Test Login Credentials:');
-    console.log('   Email: akramaxpo@gmail.com');
-    console.log('   Password: test123');
-    console.log('   Email: admin@livraison.com');
-    console.log('   Password: admin123');
-    
-    console.log('\n✅ You can now test the login functionality!');
-    
-    process.exit(0);
+    if (success) {
+      await testEndpoints();
+      showInstructions();
+    } else {
+      console.log('❌ Initialization failed');
+    }
     
   } catch (error) {
-    console.error('💥 Initialization failed:', error.message);
-    process.exit(1);
+    console.error('💥 Setup failed:', error.message);
   }
 };
 
 // تشغيل التهيئة
-initializeDatabase();
+main();

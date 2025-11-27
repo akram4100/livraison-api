@@ -653,6 +653,159 @@ app.post("/api/reset-password", async (req, res) => {
   }
 });
 // ==============================================
+// 📱 TELEGRAM-STYLE QR LOGIN SYSTEM (BASIC)
+// ==============================================
+
+// ✅ 1. إنشاء جلسة QR جديدة (للويب - مثل Telegram Web)
+app.post("/api/create-telegram-qr", async (req, res) => {
+  try {
+    console.log("🎯 Creating Telegram-style QR session...");
+    
+    const sessionId = "tg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 11);
+
+    const sessionData = {
+      session_id: sessionId,
+      status: "waiting",
+      created_at: Timestamp.now(),
+      expires_at: Timestamp.fromDate(new Date(Date.now() + 2 * 60 * 1000)), // دقيقتين
+      user_data: null,
+      mobile_device: null,
+      web_user: null,
+      type: "web_login"
+    };
+
+    await setDoc(doc(db, "qr_sessions", sessionId), sessionData);
+
+    // إنشاء QR code يحتوي على session_id فقط (مثل Telegram)
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${sessionId}&format=png&margin=10`;
+
+    console.log(`✅ Telegram QR session created: ${sessionId}`);
+
+    res.json({
+      success: true,
+      session_id: sessionId,
+      qr_url: qrUrl,
+      expires_at: sessionData.expires_at.toDate()
+    });
+
+  } catch (err) {
+    console.error("❌ Create Telegram QR error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ 2. فحص حالة الجلسة (الويب يطلب - مثل Telegram Web)
+app.get("/api/check-telegram-session/:id", async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    console.log(`🔍 Checking Telegram session: ${sessionId}`);
+
+    const sessionDoc = await getDoc(doc(db, "qr_sessions", sessionId));
+
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ success: false, message: "Session not found" });
+    }
+
+    const session = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    if (session.expires_at.toDate() < new Date()) {
+      await updateDoc(doc(db, "qr_sessions", sessionId), { 
+        status: "expired" 
+      });
+      return res.json({ 
+        success: true, 
+        session: { ...session, status: "expired" } 
+      });
+    }
+
+    console.log(`✅ Telegram session status: ${session.status}`);
+    res.json({ success: true, session });
+
+  } catch (err) {
+    console.error("❌ Check Telegram session error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ 3. الهاتف يؤكد الدخول (بعد مسح QR - مثل Telegram App)
+app.post("/api/confirm-telegram-login", async (req, res) => {
+  try {
+    const { session_id, user } = req.body;
+    console.log(`📱 Mobile confirming Telegram login: ${session_id}`, user);
+
+    const sessionRef = doc(db, "qr_sessions", session_id);
+    const sessionDoc = await getDoc(sessionRef);
+
+    if (!sessionDoc.exists()) {
+      return res.status(404).json({ success: false, message: "Session not found" });
+    }
+
+    const session = sessionDoc.data();
+
+    // التحقق من انتهاء الصلاحية
+    if (session.expires_at.toDate() < new Date()) {
+      await updateDoc(sessionRef, { status: "expired" });
+      return res.status(400).json({ success: false, message: "Session expired" });
+    }
+
+    // إذا كانت الجلسة مؤكدة مسبقاً
+    if (session.status === "confirmed") {
+      return res.json({ success: true, message: "Already confirmed" });
+    }
+
+    // تحديث الجلسة بتأكيد الدخول
+    await updateDoc(sessionRef, {
+      status: "confirmed",
+      user_data: user,
+      confirmed_at: Timestamp.now(),
+      mobile_device: {
+        confirm_time: new Date().toISOString(),
+        user_agent: req.headers['user-agent']
+      }
+    });
+
+    console.log(`✅ Telegram login confirmed: ${session_id}`);
+
+    res.json({ 
+      success: true, 
+      message: "Login confirmed successfully" 
+    });
+
+  } catch (err) {
+    console.error("❌ Confirm Telegram login error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ 4. تنظيف الجلسات القديمة
+const cleanupOldSessions = async () => {
+  try {
+    const now = Timestamp.now();
+    const q = query(
+      collection(db, "qr_sessions"),
+      where("expires_at", "<", now)
+    );
+    
+    const snapshot = await getDocs(q);
+    const deletions = [];
+    
+    snapshot.forEach(doc => {
+      deletions.push(deleteDoc(doc.ref));
+    });
+    
+    await Promise.all(deletions);
+    if (deletions.length > 0) {
+      console.log(`🧹 Cleaned ${deletions.length} expired sessions`);
+    }
+  } catch (error) {
+    console.error("Cleanup error:", error);
+  }
+};
+
+// تشغيل التنظيف كل 5 دقائق
+setInterval(cleanupOldSessions, 5 * 60 * 1000);
+// ==============================================
 // 🔐 COMPLETE QR CODE SYSTEM
 // ==============================================
 
