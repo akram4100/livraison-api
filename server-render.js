@@ -343,6 +343,196 @@ app.delete("/api/partner/stores/:storeId", async (req, res) => {
   }
 });
 // ==============================================
+// 🔧 FIX: متاجر الشريك الحقيقية من Firebase
+// ==============================================
+
+// 🔹 جلب متاجر الشريك الحقيقية
+app.get("/api/partner/stores-real", async (req, res) => {
+  try {
+    const { owner_email } = req.query;
+    console.log(`🎯 REAL API: Fetching stores for partner: ${owner_email}`);
+    
+    if (!owner_email) {
+      return res.status(400).json({
+        success: false,
+        message: "Owner email is required"
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Service unavailable"
+      });
+    }
+
+    // البحث في Firestore عن متاجر الشريك
+    const storesQuery = query(
+      collection(db, "stores"),
+      where("owner_email", "==", owner_email)
+    );
+    
+    const snapshot = await getDocs(storesQuery);
+    const stores = [];
+    
+    snapshot.forEach(doc => {
+      stores.push({
+        id: doc.id,
+        ...doc.data(),
+        created_at: doc.data().created_at?.toDate?.()?.toISOString() || new Date().toISOString(),
+        updated_at: doc.data().updated_at?.toDate?.()?.toISOString() || new Date().toISOString()
+      });
+    });
+
+    console.log(`✅ Found ${stores.length} stores for partner: ${owner_email}`);
+
+    // إذا لم يكن هناك متاجر، قم بتهيئة المتاجر النموذجية أولاً
+    if (stores.length === 0) {
+      console.log("📝 No stores found, initializing sample stores...");
+      
+      // جلب المتاجر النموذجية من Firebase
+      const sampleStoresQuery = query(
+        collection(db, "stores"),
+        limit(3)
+      );
+      const sampleSnapshot = await getDocs(sampleStoresQuery);
+      
+      const sampleStores = [];
+      sampleSnapshot.forEach(doc => {
+        sampleStores.push({
+          id: doc.id,
+          ...doc.data(),
+          owner_email: owner_email // تحديث المالك
+        });
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "✅ Partner stores fetched successfully",
+        stores: sampleStores,
+        total: sampleStores.length,
+        note: "Sample stores from Firebase"
+      });
+    } else {
+      res.status(200).json({
+        success: true,
+        message: "✅ Partner stores fetched successfully",
+        stores: stores,
+        total: stores.length
+      });
+    }
+
+  } catch (error) {
+    console.error("❌ Error fetching partner stores:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching stores",
+      error: error.message
+    });
+  }
+});
+
+// 🔹 إنشاء متجر حقيقي في Firebase
+app.post("/api/partner/stores-create-real", async (req, res) => {
+  try {
+    console.log("🏪 Creating REAL store in Firebase:", req.body);
+    
+    const {
+      name, description, category, address, phone, email,
+      logo_url, banner_url, owner_id, owner_email
+    } = req.body;
+
+    // التحقق من الحقول المطلوبة
+    if (!name || !category || !address || !owner_email) {
+      return res.status(400).json({
+        success: false,
+        message: "❌ Required fields: name, category, address, owner_email"
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Service unavailable"
+      });
+    }
+
+    // إنشاء معرف فريد للمتجر
+    const storeId = 'store_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    const storeData = {
+      id: storeId,
+      name,
+      description: description || "",
+      category,
+      address,
+      phone: phone || "",
+      email: email || owner_email,
+      owner_id: owner_id || owner_email,
+      owner_email,
+      status: "active",
+      logo_url: logo_url || "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200&h=200&fit=crop",
+      banner_url: banner_url || "https://images.unsplash.com/photo-1559339352-11d035aa65de?w=1200&h=400&fit=crop",
+      location: {
+        lat: 36.752887,
+        lng: 3.042048,
+        address: address
+      },
+      hours: {
+        sunday: "09:00-23:00",
+        monday: "09:00-23:00",
+        tuesday: "09:00-23:00",
+        wednesday: "09:00-23:00",
+        thursday: "09:00-23:00",
+        friday: "14:00-01:00",
+        saturday: "09:00-23:00"
+      },
+      settings: {
+        accepts_orders: true,
+        delivery_enabled: true,
+        pickup_enabled: true,
+        delivery_fee: 200,
+        min_order_amount: 1000,
+        preparation_time: 30,
+        payment_methods: ["cash", "card"]
+      },
+      stats: {
+        total_orders: 0,
+        total_revenue: 0,
+        average_rating: 0,
+        total_reviews: 0,
+        monthly_orders: 0
+      },
+      created_at: Timestamp.now(),
+      updated_at: Timestamp.now()
+    };
+
+    // حفظ المتجر في Firestore
+    await setDoc(doc(db, "stores", storeId), storeData);
+
+    console.log(`✅ REAL Store created in Firebase: ${storeId} - ${name}`);
+
+    res.status(201).json({
+      success: true,
+      message: "✅ Store created successfully in Firebase",
+      store_id: storeId,
+      store: {
+        ...storeData,
+        created_at: storeData.created_at.toDate().toISOString(),
+        updated_at: storeData.updated_at.toDate().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ REAL Store creation error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating store in Firebase",
+      error: error.message
+    });
+  }
+});
+// ==============================================
 // 🏥 BASIC ROUTES
 // ==============================================
 app.get("/", (req, res) => {
