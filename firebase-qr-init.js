@@ -31,7 +31,7 @@ const initializeQRSessions = async () => {
     user_data: null,
     mobile_device: null,
     scanned_at: null,
-    confirmed_at: null
+    confirmed_at: nul
   };
 
   try {
