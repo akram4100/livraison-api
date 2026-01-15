@@ -2402,7 +2402,11 @@ app.post("/api/partner/stores/create", async (req, res) => {
   }
 });
 
-// 🔹 الحصول على متاجر الشريك
+// ==============================================
+// 🏪 PARTNER STORES API - ENDPOINTS المفقودة
+// ==============================================
+
+// 🔹 الحصول على متاجر الشريك (الـ endpoint المطلوب)
 app.get("/api/partner/stores", async (req, res) => {
   try {
     const { owner_email, status } = req.query;
@@ -2452,6 +2456,16 @@ app.get("/api/partner/stores", async (req, res) => {
 
     console.log(`✅ Found ${stores.length} stores for ${owner_email}`);
 
+    // إذا لم تكن هناك متاجر، إرجاع قائمة فارغة مع رسالة
+    if (stores.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No stores found for this partner",
+        stores: [],
+        total: 0
+      });
+    }
+
     res.status(200).json({
       success: true,
       stores: stores,
@@ -2468,13 +2482,180 @@ app.get("/api/partner/stores", async (req, res) => {
   }
 });
 
+// 🔹 إنشاء متجر جديد للشريك
+app.post("/api/partner/stores/create", async (req, res) => {
+  try {
+    console.log("🏪 Creating new store:", req.body);
+    
+    const {
+      name, description, category, address, phone, email,
+      logo_url, banner_url, owner_id, owner_email
+    } = req.body;
+
+    // الحقول المطلوبة
+    if (!name || !category || !address || !owner_email) {
+      return res.status(400).json({
+        success: false,
+        message: "❌ Required fields: name, category, address, owner_email"
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Service unavailable"
+      });
+    }
+
+    // إنشاء معرف فريد للمتجر
+    const storeId = 'store_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    const storeData = {
+      id: storeId,
+      name,
+      description: description || "",
+      category,
+      address,
+      phone: phone || "",
+      email: email || owner_email, // استخدام إيميل الشريك إذا لم يتم توفير إيميل المتجر
+      owner_id: owner_id || owner_email,
+      owner_email,
+      status: "active",
+      logo_url: logo_url || "https://via.placeholder.com/200/FF6B6B/FFFFFF?text=STORE",
+      banner_url: banner_url || "https://via.placeholder.com/1200x400/4ECDC4/FFFFFF?text=" + encodeURIComponent(name),
+      location: {
+        lat: 36.752887,
+        lng: 3.042048,
+        address: address
+      },
+      hours: {
+        sunday: "09:00-23:00",
+        monday: "09:00-23:00",
+        tuesday: "09:00-23:00",
+        wednesday: "09:00-23:00",
+        thursday: "09:00-23:00",
+        friday: "14:00-01:00",
+        saturday: "09:00-23:00"
+      },
+      settings: {
+        accepts_orders: true,
+        delivery_enabled: true,
+        pickup_enabled: true,
+        delivery_fee: 200,
+        min_order_amount: 1000,
+        preparation_time: 30,
+        payment_methods: ["cash", "card"]
+      },
+      stats: {
+        total_orders: 0,
+        total_revenue: 0,
+        average_rating: 0,
+        total_reviews: 0,
+        monthly_orders: 0
+      },
+      created_at: Timestamp.now(),
+      updated_at: Timestamp.now()
+    };
+
+    // حفظ المتجر في Firestore
+    await setDoc(doc(db, "stores", storeId), storeData);
+
+    console.log(`✅ Store created successfully: ${storeId} - ${name}`);
+
+    res.status(201).json({
+      success: true,
+      message: "✅ Store created successfully",
+      store_id: storeId,
+      store: storeData
+    });
+
+  } catch (error) {
+    console.error("❌ Store creation error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating store",
+      error: error.message
+    });
+  }
+});
+
+// 🔹 حذف متجر
+app.delete("/api/partner/stores/:storeId", async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    const { user_email } = req.query;
+
+    console.log(`🗑️ Deleting store: ${storeId} by user: ${user_email}`);
+
+    if (!storeId || !user_email) {
+      return res.status(400).json({
+        success: false,
+        message: "Store ID and user email are required"
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Service unavailable"
+      });
+    }
+
+    const storeRef = doc(db, "stores", storeId);
+    const storeDoc = await getDoc(storeRef);
+
+    if (!storeDoc.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found"
+      });
+    }
+
+    // التحقق من أن المستخدم هو المالك
+    const storeData = storeDoc.data();
+    
+    if (storeData.owner_email !== user_email) {
+      return res.status(403).json({
+        success: false,
+        message: "❌ You are not authorized to delete this store"
+      });
+    }
+
+    // حذف المتجر
+    await deleteDoc(storeRef);
+
+    console.log(`✅ Store deleted successfully: ${storeId}`);
+
+    res.status(200).json({
+      success: true,
+      message: "✅ Store deleted successfully",
+      store_id: storeId
+    });
+
+  } catch (error) {
+    console.error("❌ Delete store error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting store",
+      error: error.message
+    });
+  }
+});
+
 // 🔹 تحديث متجر
 app.put("/api/partner/stores/:storeId", async (req, res) => {
   try {
     const { storeId } = req.params;
     const updateData = req.body;
 
-    console.log(`🔄 Updating store: ${storeId}`, updateData);
+    console.log(`🔄 Updating store: ${storeId}`);
+
+    if (!storeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Store ID is required"
+      });
+    }
 
     if (!db) {
       return res.status(503).json({
@@ -2517,62 +2698,6 @@ app.put("/api/partner/stores/:storeId", async (req, res) => {
   }
 });
 
-// 🔹 حذف متجر
-app.delete("/api/partner/stores/:storeId", async (req, res) => {
-  try {
-    const { storeId } = req.params;
-
-    console.log(`🗑️ Deleting store: ${storeId}`);
-
-    if (!db) {
-      return res.status(503).json({
-        success: false,
-        message: "❌ Service unavailable"
-      });
-    }
-
-    const storeRef = doc(db, "stores", storeId);
-    const storeDoc = await getDoc(storeRef);
-
-    if (!storeDoc.exists()) {
-      return res.status(404).json({
-        success: false,
-        message: "Store not found"
-      });
-    }
-
-    // التحقق من أن المستخدم هو المالك
-    const storeData = storeDoc.data();
-    const userEmail = req.headers['x-user-email'] || req.query.user_email;
-
-    if (storeData.owner_email !== userEmail) {
-      return res.status(403).json({
-        success: false,
-        message: "❌ You are not authorized to delete this store"
-      });
-    }
-
-    // حذف المتجر
-    await deleteDoc(storeRef);
-
-    console.log(`✅ Store deleted successfully: ${storeId}`);
-
-    res.status(200).json({
-      success: true,
-      message: "✅ Store deleted successfully",
-      store_id: storeId
-    });
-
-  } catch (error) {
-    console.error("❌ Delete store error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error deleting store",
-      error: error.message
-    });
-  }
-});
-
 // 🔹 رفع صور المتجر
 app.post("/api/partner/stores/upload-image", async (req, res) => {
   try {
@@ -2587,8 +2712,19 @@ app.post("/api/partner/stores/upload-image", async (req, res) => {
     }
 
     // في الإنتاج، استخدم Firebase Storage أو خدمة تخزين صور
-    // هنا نستخدم محاكاة للـ base64
-    const imageUrl = `data:image/png;base64,${image_data}`;
+    // هنا نستخدم رابط افتراضي للاختبار
+    let imageUrl;
+    
+    if (image_type === 'logo') {
+      imageUrl = "https://via.placeholder.com/200/FF6B6B/FFFFFF?text=LOGO";
+    } else if (image_type === 'banner') {
+      imageUrl = "https://via.placeholder.com/1200x400/4ECDC4/FFFFFF?text=BANNER";
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid image type. Use 'logo' or 'banner'"
+      });
+    }
 
     // تحديث رابط الصورة في قاعدة البيانات
     const storeRef = doc(db, "stores", store_id);
@@ -2619,6 +2755,57 @@ app.post("/api/partner/stores/upload-image", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error uploading image",
+      error: error.message
+    });
+  }
+});
+
+// 🔹 الحصول على متجر واحد
+app.get("/api/partner/stores/:storeId", async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    console.log(`🔍 Getting store: ${storeId}`);
+
+    if (!storeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Store ID is required"
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Service unavailable"
+      });
+    }
+
+    const storeDoc = await getDoc(doc(db, "stores", storeId));
+
+    if (!storeDoc.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found"
+      });
+    }
+
+    const storeData = storeDoc.data();
+
+    res.status(200).json({
+      success: true,
+      store: {
+        id: storeDoc.id,
+        ...storeData,
+        created_at: storeData.created_at?.toDate?.() || storeData.created_at,
+        updated_at: storeData.updated_at?.toDate?.() || storeData.updated_at
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Get store error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching store",
       error: error.message
     });
   }
