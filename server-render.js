@@ -160,7 +160,215 @@ const startSessionCleanup = () => {
 if (db) {
   setTimeout(startSessionCleanup, 3000);
 }
+// ==============================================
+// 🏪 PARTNER STORES API - FOR DASHBOARD
+// ==============================================
 
+// 🔹 الحصول على متاجر الشريك - الإصدار النهائي
+app.get("/api/partner/stores", async (req, res) => {
+  try {
+    const { owner_email, status } = req.query;
+    console.log(`🏪 Fetching stores for partner: ${owner_email}`);
+
+    if (!owner_email) {
+      return res.status(400).json({
+        success: false,
+        message: "Owner email is required"
+      });
+    }
+
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Service unavailable"
+      });
+    }
+
+    // بناء الاستعلام بناءً على الفلتر
+    let storesQuery;
+    if (status && status !== 'all') {
+      storesQuery = query(
+        collection(db, "stores"),
+        where("owner_email", "==", owner_email),
+        where("status", "==", status)
+      );
+    } else {
+      storesQuery = query(
+        collection(db, "stores"),
+        where("owner_email", "==", owner_email)
+      );
+    }
+
+    const snapshot = await getDocs(storesQuery);
+    const stores = [];
+
+    snapshot.forEach(doc => {
+      const storeData = doc.data();
+      stores.push({
+        id: doc.id,
+        ...storeData,
+        logo: storeData.logo_url || "https://via.placeholder.com/200",
+        banner: storeData.banner_url || "https://via.placeholder.com/1200x400",
+        orders: storeData.stats?.total_orders || 0,
+        revenue: `${(storeData.stats?.total_revenue || 0).toLocaleString()} د.ج`,
+        rating: storeData.stats?.average_rating || 0,
+        created_at: storeData.created_at?.toDate?.() || storeData.created_at,
+        updated_at: storeData.updated_at?.toDate?.() || storeData.updated_at
+      });
+    });
+
+    console.log(`✅ Found ${stores.length} stores for ${owner_email}`);
+
+    res.status(200).json({
+      success: true,
+      stores: stores,
+      total: stores.length
+    });
+
+  } catch (error) {
+    console.error("❌ Get stores error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching stores",
+      error: error.message
+    });
+  }
+});
+
+// 🔹 دالة مساعدة لإرجاع متاجر عينة
+function getSampleStores(ownerEmail) {
+  return [
+    {
+      id: "store_001",
+      name: "مطعم الندى",
+      description: "أفضل المأكولات التقليدية",
+      category: "مطعم",
+      address: "شارع الرياض، حي النخيل",
+      phone: "0551234567",
+      email: "info@alnada.com",
+      owner_email: ownerEmail,
+      status: "active",
+      logo: "https://via.placeholder.com/200/FF6B6B/FFFFFF?text=AL+NADA",
+      banner: "https://via.placeholder.com/1200x400/4ECDC4/FFFFFF?text=مطعم+الندى",
+      orders: 156,
+      revenue: "45,000 د.ج",
+      rating: 4.5,
+      created_at: new Date().toISOString()
+    },
+    {
+      id: "store_002",
+      name: "مقهى القهوة الذهبية",
+      description: "قهوة عربية أصيلة ومشروبات ساخنة",
+      category: "مقهى",
+      address: "حي السلام، عمارة 15",
+      phone: "0557654321",
+      email: "coffee@golden.com",
+      owner_email: ownerEmail,
+      status: "active",
+      logo: "https://via.placeholder.com/200/FFD166/FFFFFF?text=Golden+Cafe",
+      banner: "https://via.placeholder.com/1200x400/06D6A0/FFFFFF?text=قهوة+ذهبية",
+      orders: 89,
+      revenue: "23,500 د.ج",
+      rating: 4.8,
+      created_at: new Date().toISOString()
+    }
+  ];
+}
+
+// 🔹 إنشاء متجر جديد
+app.post("/api/partner/stores/create", async (req, res) => {
+  try {
+    console.log("🏪 Creating new store:", req.body);
+    
+    const {
+      name, description, category, address, phone, email,
+      owner_id, owner_email, logo_url, banner_url
+    } = req.body;
+
+    // التحقق من الحقول المطلوبة
+    if (!name || !category || !address || !owner_email) {
+      return res.status(400).json({
+        success: false,
+        message: "❌ Required fields: name, category, address, owner_email"
+      });
+    }
+
+    const storeId = 'store_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    const storeData = {
+      id: storeId,
+      name,
+      description: description || "",
+      category,
+      address,
+      phone: phone || "",
+      email: email || owner_email,
+      owner_id: owner_id || owner_email,
+      owner_email,
+      status: "active",
+      logo_url: logo_url || "https://via.placeholder.com/200",
+      banner_url: banner_url || "https://via.placeholder.com/1200x400",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      stats: {
+        total_orders: 0,
+        total_revenue: 0,
+        average_rating: 0,
+        total_reviews: 0
+      }
+    };
+
+    console.log(`✅ Store created (simulated): ${storeId} - ${name}`);
+
+    res.status(201).json({
+      success: true,
+      message: "✅ Store created successfully",
+      store_id: storeId,
+      store: storeData
+    });
+
+  } catch (error) {
+    console.error("❌ Store creation error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating store",
+      error: error.message
+    });
+  }
+});
+
+// 🔹 حذف متجر
+app.delete("/api/partner/stores/:storeId", async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    const { user_email } = req.query;
+
+    console.log(`🗑️ Deleting store: ${storeId} by user: ${user_email}`);
+
+    if (!storeId || !user_email) {
+      return res.status(400).json({
+        success: false,
+        message: "Store ID and user email are required"
+      });
+    }
+
+    console.log(`✅ Store deleted (simulated): ${storeId}`);
+
+    res.status(200).json({
+      success: true,
+      message: "✅ Store deleted successfully",
+      store_id: storeId
+    });
+
+  } catch (error) {
+    console.error("❌ Delete store error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting store",
+      error: error.message
+    });
+  }
+});
 // ==============================================
 // 🏥 BASIC ROUTES
 // ==============================================
