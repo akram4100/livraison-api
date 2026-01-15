@@ -2310,7 +2310,6 @@ app.use('*', (req, res) => {
 // ==============================================
 // 🏪 STORES MANAGEMENT API
 // ==============================================
-const { query, where, orderBy } = require('firebase/firestore');
 // 🔹 إنشاء متجر جديد
 app.post("/api/partner/stores/create", async (req, res) => {
   try {
