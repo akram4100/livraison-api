@@ -2,6 +2,7 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const { limit } = require('firebase/firestore');
 // 🔹 تأكد من أن هذه الـ Imports موجودة في أعلى الملف
 const { 
   collection, 
@@ -2774,94 +2775,9 @@ app.get("/api/stores/:storeId/products", async (req, res) => {
 
 // 🔹 دالة مساعدة لإنشاء منتجات نموذجية
 const initializeSampleProducts = async (storeId) => {
-  try {
-    const sampleProducts = [
-      {
-        id: "product_001",
-        name: "كشري مصري",
-        description: "طبق كشري تقليدي مع صلصة الطماطم والبصل المقلي",
-        price: 800,
-        category: "أطباق رئيسية",
-        image_url: "https://images.unsplash.com/photo-1563379091339-03246963d9d6?w=400&h=300&fit=crop&crop=center",
-        available: true,
-        rating: 4.7,
-        total_orders: 45,
-        preparation_time: 15,
-        ingredients: ["أرز", "عدس", "معكرونة", "صلصة طماطم", "بصل مقلي"]
-      },
-      {
-        id: "product_002",
-        name: "فلافل",
-        description: "فلافل مقرمشة مع صلصة الطحينة والخضروات الطازجة",
-        price: 500,
-        category: "مقبلات",
-        image_url: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&h=300&fit=crop&crop=center",
-        available: true,
-        rating: 4.5,
-        total_orders: 78,
-        preparation_time: 10,
-        ingredients: ["حمص", "بقدونس", "ثوم", "بهارات"]
-      },
-      {
-        id: "product_003",
-        name: "عصير برتقال طازج",
-        description: "عصير برتقال طبيعي 100% مع قطع البرتقال",
-        price: 400,
-        category: "مشروبات",
-        image_url: "https://images.unsplash.com/photo-1621506289937-a8e4df240d0b?w=400&h=300&fit=crop&crop=center",
-        available: true,
-        rating: 4.8,
-        total_orders: 120,
-        preparation_time: 5,
-        ingredients: ["برتقال طازج"]
-      },
-      {
-        id: "product_004",
-        name: "شاورما دجاج",
-        description: "شاورما دجاج مشوية مع خضار وصوص خاص",
-        price: 1200,
-        category: "ساندويتشات",
-        image_url: "https://images.unsplash.com/photo-1603360946369-dc9bb6258143?w=400&h=300&fit=crop&crop=center",
-        available: true,
-        rating: 4.6,
-        total_orders: 89,
-        preparation_time: 20,
-        ingredients: ["دجاج", "خس", "طماطم", "صوص ثوم", "خبز عربي"]
-      },
-      {
-        id: "product_005",
-        name: "كنافة بالنقش",
-        description: "كنافة مقلية بحشوة القشطة والمكسرات",
-        price: 900,
-        category: "حلويات",
-        image_url: "https://images.unsplash.com/photo-1563729784474-d77dbb933a9e?w=400&h=300&fit=crop&crop=center",
-        available: true,
-        rating: 4.9,
-        total_orders: 56,
-        preparation_time: 25,
-        ingredients: ["عجينة الكنافة", "قشطة", "جبن", "سكر", "مكسرات"]
-      }
-    ];
-
-    // إنشاء المنتجات في subcollection
-    const creationPromises = sampleProducts.map(async (product) => {
-      const productData = {
-        ...product,
-        store_id: storeId,
-        created_at: Timestamp.now(),
-        updated_at: Timestamp.now()
-      };
-      
-      await setDoc(doc(db, "stores", storeId, "products", product.id), productData);
-      console.log(`✅ Created sample product: ${product.name}`);
-    });
-
-    await Promise.all(creationPromises);
-    console.log(`✅ Initialized ${sampleProducts.length} sample products for store: ${storeId}`);
-
-  } catch (error) {
-    console.error("❌ Error initializing sample products:", error);
-  }
+  // ❌ تم تعطيل إضافة المنتجات الافتراضية
+  // المتجر الجديد سيكون فارغاً من المنتجات
+  console.log(`📝 Sample products initialization disabled for store: ${storeId}`);
 };
 
 // 🔹 إضافة منتج جديد
