@@ -428,7 +428,363 @@ app.get("/api/partner/stores-real", async (req, res) => {
     console.error("❌ Error fetching partner stores:", error);
     res.status(500).json({
       success: false,
-      message: "Error fetching stores",
+      message: "Error fetching partner stores"
+    });
+  }
+});
+
+// ==============================================
+// 🛒 GET ALL STORES FOR CLIENT - عام للعملاء
+// ==============================================
+app.get("/api/stores", async (req, res) => {
+  try {
+    console.log("🏪 API CALLED: /api/stores - جلب جميع المتاجر");
+    
+    if (!db) {
+      console.error("❌ Firebase غير متصل!");
+      return res.status(503).json({
+        success: false,
+        message: "❌ قاعدة البيانات غير متصلة"
+      });
+    }
+
+    console.log("📡 محاولة الاتصال بـ Firebase...");
+    
+    // محاولة جلب المتاجر من Firebase مباشرة
+    const storesCollection = collection(db, "stores");
+    console.log("🔍 تم إنشاء مرجع مجموعة stores");
+    
+    const snapshot = await getDocs(storesCollection);
+    console.log(`📊 عدد المستندات المسترجعة: ${snapshot.size}`);
+    
+    if (snapshot.size > 0) {
+      // إذا كانت هناك متاجر حقيقية
+      const stores = [];
+      snapshot.forEach((doc) => {
+        const storeData = doc.data();
+        console.log(`✅ متجر موجود: ${storeData.name || doc.id}`);
+        stores.push({
+          id: doc.id,
+          ...storeData
+        });
+      });
+      
+      console.log(`✅✅ جلب ${stores.length} متجر من Firebase بنجاح!`);
+      return res.status(200).json({
+        success: true,
+        message: "✅ تم جلب المتاجر من Firebase بنجاح",
+        stores: stores,
+        total: stores.length,
+        source: "Firebase (Real Data)",
+        debug: {
+          firebaseConnected: true,
+          documentsCount: snapshot.size
+        }
+      });
+    } else {
+      console.warn("⚠️ لا توجد متاجر في Firebase - المجموعة فارغة");
+    }
+    
+    console.log("📝 استخدام بيانات عينة (قاعدة البيانات فارغة)");
+    
+    // إذا كانت قاعدة البيانات فارغة أو بها خطأ، استخدم بيانات عينة
+    const sampleStores = [
+      {
+        id: "store_001",
+        name: "مطعم الندى",
+        category: "restaurant",
+        description: "أفضل المأكولات التقليدية والعربية",
+        address: "شارع الرياض، حي النخيل",
+        phone: "0551234567",
+        logo_url: "https://via.placeholder.com/150/FF6B6B/FFFFFF?text=الندى",
+        banner_url: "https://via.placeholder.com/400x200/FF6B6B/FFFFFF?text=مطعم+الندى",
+        rating: 4.7,
+        total_reviews: 89,
+        status: "active",
+        delivery_fee: 200,
+        min_order: 1000,
+        preparation_time: 30,
+        open: true,
+        hours: "09:00 - 23:00"
+      },
+      {
+        id: "store_002",
+        name: "مقهى القهوة الذهبية",
+        category: "cafe",
+        description: "قهوة عربية أصيلة ومشروبات ساخنة",
+        address: "حي السلام، عمارة 15",
+        phone: "0557654321",
+        logo_url: "https://via.placeholder.com/150/FFD166/FFFFFF?text=القهوة",
+        banner_url: "https://via.placeholder.com/400x200/FFD166/FFFFFF?text=القهوة+الذهبية",
+        rating: 4.8,
+        total_reviews: 67,
+        status: "active",
+        delivery_fee: 150,
+        min_order: 500,
+        preparation_time: 15,
+        open: true,
+        hours: "08:00 - 22:00"
+      },
+      {
+        id: "store_003",
+        name: "مخبز الأصالة",
+        category: "bakery",
+        description: "خبز طازج يومياً وحلويات تقليدية",
+        address: "حي الثورة، شارع الاستقلال",
+        phone: "0558901234",
+        logo_url: "https://via.placeholder.com/150/F4A460/FFFFFF?text=الخبز",
+        banner_url: "https://via.placeholder.com/400x200/F4A460/FFFFFF?text=مخبز+الأصالة",
+        rating: 4.5,
+        total_reviews: 112,
+        status: "active",
+        delivery_fee: 100,
+        min_order: 300,
+        preparation_time: 10,
+        open: true,
+        hours: "06:00 - 20:00"
+      }
+    ];
+
+    console.log("⚠️ استخدام بيانات عينة (قاعدة البيانات فارغة أو غير متصلة)");
+    res.status(200).json({
+      success: true,
+      message: "✅ تم جلب بيانات عينة",
+      stores: sampleStores,
+      total: sampleStores.length,
+      source: "Sample Data"
+    });
+
+  } catch (error) {
+    console.error("❌ خطأ في جلب المتاجر:", error);
+    res.status(500).json({
+      success: false,
+      message: "❌ خطأ في جلب المتاجر",
+      error: error.message
+    });
+  }
+});
+
+// ==============================================
+// � DEBUG: اختبار اتصال Firebase
+// ==============================================
+app.get("/api/test-firebase", async (req, res) => {
+  try {
+    console.log("\n🔧 🔧 🔧 اختبار اتصال Firebase 🔧 🔧 🔧\n");
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ Firebase غير متصل",
+        status: "not_connected"
+      });
+    }
+
+    console.log("✅ Firebase متصل");
+    
+    // اختبر جلب من مجموعة stores
+    console.log("📡 محاولة جلب من مجموعة 'stores'...");
+    const storesRef = collection(db, "stores");
+    const storesSnapshot = await getDocs(storesRef);
+    console.log(`✅ عدد المستندات في 'stores': ${storesSnapshot.size}`);
+    
+    // اختبر جلب من مجموعة products
+    console.log("📡 محاولة جلب من مجموعة 'products'...");
+    const productsRef = collection(db, "products");
+    const productsSnapshot = await getDocs(productsRef);
+    console.log(`✅ عدد المستندات في 'products': ${productsSnapshot.size}`);
+    
+    // اختبر جلب من مجموعة users
+    console.log("📡 محاولة جلب من مجموعة 'users'...");
+    const usersRef = collection(db, "users");
+    const usersSnapshot = await getDocs(usersRef);
+    console.log(`✅ عدد المستندات في 'users': ${usersSnapshot.size}`);
+    
+    // اعرض أول 3 مستندات من stores
+    console.log("\n📝 عينات من بيانات المتاجر:");
+    let storeCount = 0;
+    storesSnapshot.forEach((doc) => {
+      if (storeCount < 3) {
+        console.log(`\n  🏪 ${doc.id}:`);
+        console.log(`     Name: ${doc.data().name || 'N/A'}`);
+        console.log(`     Category: ${doc.data().category || 'N/A'}`);
+        console.log(`     Status: ${doc.data().status || 'N/A'}`);
+        storeCount++;
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "✅ Firebase متصل وجاهز",
+      collections: {
+        stores: {
+          count: storesSnapshot.size,
+          samples: Array.from(storesSnapshot.docs).slice(0, 2).map(doc => ({
+            id: doc.id,
+            name: doc.data().name,
+            category: doc.data().category,
+            status: doc.data().status
+          }))
+        },
+        products: {
+          count: productsSnapshot.size
+        },
+        users: {
+          count: usersSnapshot.size
+        }
+      },
+      status: "connected"
+    });
+    
+  } catch (error) {
+    console.error("❌ خطأ في اختبار Firebase:", error);
+    res.status(500).json({
+      success: false,
+      message: "❌ خطأ في اختبار Firebase",
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// ==============================================
+// �🛒 GET STORE BY CATEGORY - المتاجر حسب الفئة
+// ==============================================
+app.get("/api/stores/category/:category", async (req, res) => {
+  try {
+    const { category } = req.params;
+    console.log(`🏪 جلب المتاجر من فئة: ${category}`);
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ قاعدة البيانات غير متصلة"
+      });
+    }
+
+    // جلب المتاجر حسب الفئة
+    const storesQuery = query(
+      collection(db, "stores"),
+      where("category", "==", category)
+    );
+    
+    const snapshot = await getDocs(storesQuery);
+    const stores = [];
+    
+    snapshot.forEach((doc) => {
+      stores.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `✅ تم جلب ${stores.length} متجر من فئة ${category}`,
+      stores: stores,
+      total: stores.length,
+      category: category
+    });
+
+  } catch (error) {
+    console.error("❌ خطأ في جلب المتاجر حسب الفئة:", error);
+    res.status(500).json({
+      success: false,
+      message: "❌ خطأ في جلب المتاجر حسب الفئة",
+      error: error.message
+    });
+  }
+});
+
+// ==============================================
+// 🏪 GET STORE DETAILS - تفاصيل متجر محدد
+// ==============================================
+app.get("/api/stores/:storeId/details", async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    console.log(`🏪 جلب تفاصيل المتجر: ${storeId}`);
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ قاعدة البيانات غير متصلة"
+      });
+    }
+
+    const storeDoc = await getDoc(doc(db, "stores", storeId));
+    
+    if (!storeDoc.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "❌ المتجر غير موجود"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "✅ تم جلب تفاصيل المتجر",
+      store: {
+        id: storeDoc.id,
+        ...storeDoc.data()
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ خطأ في جلب تفاصيل المتجر:", error);
+    res.status(500).json({
+      success: false,
+      message: "❌ خطأ في جلب تفاصيل المتجر",
+      error: error.message
+    });
+  }
+});
+
+// ==============================================
+// 🔍 SEARCH STORES - البحث عن المتاجر
+// ==============================================
+app.get("/api/stores/search/:query", async (req, res) => {
+  try {
+    const { query: searchQuery } = req.params;
+    console.log(`🔍 البحث عن المتاجر: ${searchQuery}`);
+    
+    if (!db) {
+      return res.status(503).json({
+        success: false,
+        message: "❌ قاعدة البيانات غير متصلة"
+      });
+    }
+
+    // جلب جميع المتاجر والبحث محلياً
+    const storesCollection = collection(db, "stores");
+    const snapshot = await getDocs(storesCollection);
+    const results = [];
+    
+    snapshot.forEach((doc) => {
+      const store = doc.data();
+      const name = (store.name || "").toLowerCase();
+      const description = (store.description || "").toLowerCase();
+      const searchLower = searchQuery.toLowerCase();
+      
+      if (name.includes(searchLower) || description.includes(searchLower)) {
+        results.push({
+          id: doc.id,
+          ...store
+        });
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `✅ تم العثور على ${results.length} متاجر`,
+      stores: results,
+      total: results.length,
+      query: searchQuery
+    });
+
+  } catch (error) {
+    console.error("❌ خطأ في البحث:", error);
+    res.status(500).json({
+      success: false,
+      message: "❌ خطأ في البحث عن المتاجر",
       error: error.message
     });
   }
